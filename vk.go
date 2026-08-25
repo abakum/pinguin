@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/SevereCloud/vksdk/v3/api"
 	"github.com/SevereCloud/vksdk/v3/object"
@@ -18,22 +19,50 @@ func CreateBot(token string) (*api.VK, error) {
 
 // single inline keyboard for all bot messages:
 // row 1 - single ip commands, rows 2-3 - group commands with "…" prefix
-var kb = func() *object.MessagesKeyboard {
-	kb := object.NewMessagesKeyboardInline()
-	kb.AddRow().
-		AddCallbackButton("🔁", "🔁", "secondary").
-		AddCallbackButton("⏸️", "⏸️", "secondary").
-		AddCallbackButton("❌", "❌", "secondary")
-	kb.AddRow().
-		AddCallbackButton("…🔁", "…🔁", "secondary").
-		AddCallbackButton("…⏸️", "…⏸️", "secondary").
-		AddCallbackButton("…❌", "…❌", "secondary")
-	kb.AddRow().
-		AddCallbackButton("…✅❌", "…✅❌", "secondary").
-		AddCallbackButton("…❗❌", "…❗❌", "secondary").
-		AddCallbackButton("…⏸️❌", "…⏸️❌", "secondary")
-	return kb
-}()
+var (
+	kb = func() *object.MessagesKeyboard {
+		kb := object.NewMessagesKeyboardInline()
+		kb.AddRow().
+			AddCallbackButton("🔁", "🔁", "secondary").
+			AddCallbackButton("⏸️", "⏸️", "secondary").
+			AddCallbackButton("❌", "❌", "secondary").
+			AddCallbackButton("❎", "❎", "secondary")
+		kb.AddRow().
+			AddCallbackButton("…🔁", "…🔁", "secondary").
+			AddCallbackButton("…⏸️", "…⏸️", "secondary").
+			AddCallbackButton("…❌", "…❌", "secondary")
+		kb.AddRow().
+			AddCallbackButton("…✅❌", "…✅❌", "secondary").
+			AddCallbackButton("…❗❌", "…❗❌", "secondary").
+			AddCallbackButton("…⏸️❌", "…⏸️❌", "secondary")
+		return kb
+	}()
+
+	// single ip commands only, for status replies
+	kbIP = func() *object.MessagesKeyboard {
+		kb := object.NewMessagesKeyboardInline()
+		kb.AddRow().
+			AddCallbackButton("🔁", "🔁", "secondary").
+			AddCallbackButton("⏸️", "⏸️", "secondary").
+			AddCallbackButton("❌", "❌", "secondary").
+			AddCallbackButton("❎", "❎", "secondary")
+		return kb
+	}()
+
+	// group commands only, for pinnable messages
+	kbGroup = func() *object.MessagesKeyboard {
+		kb := object.NewMessagesKeyboardInline()
+		kb.AddRow().
+			AddCallbackButton("…🔁", "…🔁", "secondary").
+			AddCallbackButton("…⏸️", "…⏸️", "secondary").
+			AddCallbackButton("…❌", "…❌", "secondary")
+		kb.AddRow().
+			AddCallbackButton("…✅❌", "…✅❌", "secondary").
+			AddCallbackButton("…❗❌", "…❗❌", "secondary").
+			AddCallbackButton("…⏸️❌", "…⏸️❌", "secondary")
+		return kb
+	}()
+)
 
 // payload is a json encoded string, decode to plain command
 func unpay(p json.RawMessage) string {
@@ -45,15 +74,21 @@ func unpay(p json.RawMessage) string {
 }
 
 // send message with keyboard, replyTo is conversation message id or 0
-func sendKeyboard(peerID, replyTo int, text string) (id int, err error) {
+func sendKeyboard(peerID, replyTo int, text string, kbs ...*object.MessagesKeyboard) (id int, err error) {
+	k := kbIP
+	if len(kbs) > 0 && kbs[0] != nil {
+		k = kbs[0]
+	}
 	p := api.Params{
 		"peer_id":   peerID,
 		"message":   text,
-		"keyboard":  kb.ToJSON(),
+		"keyboard":  k.ToJSON(),
 		"random_id": 0,
 	}
 	if replyTo > 0 {
-		p["reply_to"] = replyTo
+		// reply_to expects a global message id, which is 0 in community chat
+		// events, so use forward+is_reply with conversation_message_ids
+		p["forward"] = fmt.Sprintf(`{"peer_id":%d,"conversation_message_ids":[%d],"is_reply":true}`, peerID, replyTo)
 	}
 	return bot.MessagesSend(p)
 }
@@ -83,8 +118,8 @@ func answerEvent(eventID string, userID, peerID int, text string) error {
 // get bot message by conversation message id
 func convMessage(peerID, conversationMessageID int) *object.MessagesMessage {
 	res, err := bot.MessagesGetByConversationMessageID(api.Params{
-		"peer_id":                 peerID,
-		"conversation_message_id": conversationMessageID,
+		"peer_id":                  peerID,
+		"conversation_message_ids": []int{conversationMessageID},
 	})
 	if err != nil {
 		let.Println(err)

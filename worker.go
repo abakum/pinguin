@@ -39,9 +39,9 @@ func worker(ip string, ch cCustomer) {
 				deadline = time.Unix(cust.Deadline, 0)
 				ltf.Println("loaded ", ip, status, deadline)
 			} else if cust.MsgID == 0 { //update
-				switch cust.Cmd {
-				case "⏸️":
-					deadline = time.Now().Add(-refresh)
+			switch cust.Cmd {
+			case "⏸️":
+				deadline = time.Now().Add(-refresh)
 			case "🔁":
 				deadline = time.Now().Add(dd)
 				default:

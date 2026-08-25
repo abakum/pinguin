@@ -245,6 +245,15 @@ func onMessageEvent(obj events.MessageEventObject) error {
 	if !my {
 		return nil
 	}
+	if Data == "❎" {
+		if tm.ID > 0 { // messages.delete expects global message id, not cmid
+			err = deleteMessage(obj.PeerID, tm.ID)
+			if err != nil {
+				let.Println(err)
+			}
+		}
+		return nil
+	}
 
 	if ips.count() == 0 {
 		return nil
@@ -306,7 +315,7 @@ func bhAnyCommand(tm *object.MessagesMessage) error {
 		"en:List of IP addresses expected\n",
 		"ru:Ожидался список IP адресов\n",
 	) + "/127.0.0.1 127.0.0.2 127.0.0.254" + ups
-	_, err := sendKeyboard(tm.PeerID, msgID(tm), text)
+	_, err := sendKeyboard(tm.PeerID, msgID(tm), text, kbGroup)
 	if err != nil {
 		let.Println(err)
 	}

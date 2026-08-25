@@ -9,7 +9,7 @@ Pinger with VK bot interface without WebHook — port of https://github.com/abak
 4. **Получите ключ доступа** (токен сообщества): управление → «Работа с API» → «Ключи доступа» → «Создать ключ» → отметьте права: **Управление сообщениями** (`messages`) — достаточно для отправки/удаления сообщений и работы callback-кнопок. Скопируйте токен — он показывается один раз.
 5. **Узнайте peer ID** разрешённых чатов:
    - ЛС с ботом: положительный ID пользователя (`vk.com/id…`);
-   - беседа: отрицательный `2000000000 + id_беседы`;
+   - беседа: положительный `2000000000 + id_беседы`;
    - чтобы бот работал в беседе, добавьте его в участники беседы.
 
 ## Usage
@@ -17,7 +17,7 @@ Pinger with VK bot interface without WebHook — port of https://github.com/abak
 TOKEN=VK_COMMUNITY_TOKEN pinguin AllowedPeerID1 AllowedPeerID2 AllowedPeerIDx
 ```
 - `TOKEN` — токен сообщества VK (Bots API, long polling)
-- аргументы — разрешённые peer ID (положительные для ЛС, отрицательные для бесед)
+- аргументы — разрешённые peer ID (положительные для ЛС и бесед)
 - состояние пингов не переносится со старого `tmbPing.json` — начинается с чистого файла
 
 ## Запуск на Windows
@@ -32,7 +32,7 @@ cd /d %~dp0
 set bot=PingBot
 set TOKEN=YourCommunityTokenHere
 set goBin=%USERPROFILE%\go\bin
-set PEER_IDS=123456789 -2000000001
+set PEER_IDS=123456789 2000000001
 
 go install
 start "%bot%" %goBin%\pinguin.exe %PEER_IDS%
