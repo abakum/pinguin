@@ -184,26 +184,34 @@ func onMessageNew(tm *object.MessagesMessage) error {
 	return nil
 }
 
+// conversation message id of message, fallback to id
+func msgID(tm *object.MessagesMessage) int {
+	if tm.ConversationMessageID > 0 {
+		return tm.ConversationMessageID
+	}
+	return tm.ID
+}
+
 // handler IP
 func bhAnyWithMatch(tc string, tm *object.MessagesMessage) error {
 	ok, ups := allowed(tm.FromID, tm.PeerID)
 	keys, _ := set(reIP.FindAllString(tc, -1))
-	ltf.Println("MessageNew anyWithIP", keys, tm.PeerID, tm.FromID, tm.ID)
+	ltf.Println("MessageNew anyWithIP", keys, tm.PeerID, tm.FromID, msgID(tm))
 	if ok {
 		for _, ip := range keys {
-			ips.write(ip, customer{PeerID: tm.PeerID, UserID: tm.FromID, MsgID: tm.ID})
+			ips.write(ip, customer{PeerID: tm.PeerID, UserID: tm.FromID, MsgID: msgID(tm)})
 		}
 	} else {
 		news := ""
 		for _, ip := range keys {
 			if ips.read(ip) {
-				ips.write(ip, customer{PeerID: tm.PeerID, UserID: tm.FromID, MsgID: tm.ID})
+				ips.write(ip, customer{PeerID: tm.PeerID, UserID: tm.FromID, MsgID: msgID(tm)})
 			} else {
 				news += ip + " "
 			}
 		}
 		if len(news) > 1 {
-			_, err := sendKeyboard(tm.PeerID, tm.ID, "/"+strings.TrimRight(news, " ")+"\n"+ups)
+			_, err := sendKeyboard(tm.PeerID, msgID(tm), "/"+strings.TrimRight(news, " ")+"\n"+ups)
 			if err != nil {
 				let.Println(err)
 			}
@@ -235,13 +243,6 @@ func onMessageEvent(obj events.MessageEventObject) error {
 		let.Println(err)
 	}
 	if !my {
-		return nil
-	}
-	if Data == "❎" {
-		err = deleteMessage(obj.PeerID, obj.ConversationMessageID)
-		if err != nil {
-			let.Println(err)
-		}
 		return nil
 	}
 
@@ -305,7 +306,7 @@ func bhAnyCommand(tm *object.MessagesMessage) error {
 		"en:List of IP addresses expected\n",
 		"ru:Ожидался список IP адресов\n",
 	) + "/127.0.0.1 127.0.0.2 127.0.0.254" + ups
-	_, err := sendKeyboard(tm.PeerID, tm.ID, text)
+	_, err := sendKeyboard(tm.PeerID, msgID(tm), text)
 	if err != nil {
 		let.Println(err)
 	}
@@ -321,7 +322,7 @@ func bhLeftChat(tm *object.MessagesMessage) error {
 		"en:Cute... 😢",
 		"ru:Милый... 😢",
 	)
-	_, err := sendKeyboard(tm.PeerID, tm.ID, text)
+	_, err := sendKeyboard(tm.PeerID, msgID(tm), text)
 	if err != nil {
 		let.Println(err)
 	}
@@ -338,7 +339,7 @@ func bhNewMember(tm *object.MessagesMessage) error {
 		"en:Hello villagers!\nThe cart is ready!🏓",
 		"ru:Здорово, селяне!\nТелега готова!🏓",
 	)
-	_, err := sendKeyboard(tm.PeerID, tm.ID, text)
+	_, err := sendKeyboard(tm.PeerID, msgID(tm), text)
 	if err != nil {
 		let.Println(err)
 	}

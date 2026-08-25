@@ -32,7 +32,7 @@ var (
 	tt          = tth
 	save        = make(cCustomer, 1)
 	saveDone    = make(chan bool, 1)
-	tmbPingJson = "tmbPing.json"
+	tmbPingJson = "pinguin.json"
 	ticker,
 	tacker *time.Ticker
 	dic  = mss{}

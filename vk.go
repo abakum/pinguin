@@ -22,13 +22,10 @@ var kb = func() *object.MessagesKeyboard {
 	kb := object.NewMessagesKeyboardInline()
 	kb.AddRow().
 		AddCallbackButton("🔁", "🔁", "secondary").
-		AddCallbackButton("🔂", "🔂", "secondary").
 		AddCallbackButton("⏸️", "⏸️", "secondary").
-		AddCallbackButton("❌", "❌", "secondary").
-		AddCallbackButton("❎", "❎", "secondary")
+		AddCallbackButton("❌", "❌", "secondary")
 	kb.AddRow().
 		AddCallbackButton("…🔁", "…🔁", "secondary").
-		AddCallbackButton("…🔂", "…🔂", "secondary").
 		AddCallbackButton("…⏸️", "…⏸️", "secondary").
 		AddCallbackButton("…❌", "…❌", "secondary")
 	kb.AddRow().

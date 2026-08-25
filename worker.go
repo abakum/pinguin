@@ -42,10 +42,8 @@ func worker(ip string, ch cCustomer) {
 				switch cust.Cmd {
 				case "⏸️":
 					deadline = time.Now().Add(-refresh)
-				case "🔁":
-					deadline = time.Now().Add(dd)
-				case "🔂":
-					deadline = time.Now().Add(refresh)
+			case "🔁":
+				deadline = time.Now().Add(dd)
 				default:
 					if strings.HasSuffix(cust.Cmd, "❌") {
 						tsX := strings.TrimSuffix(cust.Cmd, "❌") // empty|pause|connect|disconnect

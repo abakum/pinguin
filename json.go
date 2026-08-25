@@ -37,15 +37,23 @@ func saver() {
 	for {
 		select {
 		case <-saveDone:
-			ltf.Println(cus)
-			bytes, err := json.Marshal(conf)
-			if err != nil {
-				PrintOk("", err)
-				return
+			// drain buffered save records before writing file
+			for {
+				select {
+				case cu := <-save:
+					cus = append(cus, cu)
+				default:
+					ltf.Println(cus)
+					bytes, err := json.Marshal(conf)
+					if err != nil {
+						PrintOk("", err)
+						return
+					}
+					err = os.WriteFile(tmbPingJson, bytes, 0644)
+					PrintOk("saver", err)
+					return
+				}
 			}
-			err = os.WriteFile(tmbPingJson, bytes, 0644)
-			PrintOk("saver", err)
-			return
 		case cu, ok := <-save:
 			if ok {
 				cus = append(cus, cu)
