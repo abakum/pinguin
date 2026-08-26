@@ -17,27 +17,9 @@ func CreateBot(token string) (*api.VK, error) {
 	return api.NewVK(token), nil
 }
 
-// single inline keyboard for all bot messages:
-// row 1 - single ip commands, rows 2-3 - group commands with "…" prefix
+// inline keyboards:
+// row 1 - single ip commands, rows with "…" prefix - group commands
 var (
-	kb = func() *object.MessagesKeyboard {
-		kb := object.NewMessagesKeyboardInline()
-		kb.AddRow().
-			AddCallbackButton("🔁", "🔁", "secondary").
-			AddCallbackButton("⏸️", "⏸️", "secondary").
-			AddCallbackButton("❌", "❌", "secondary").
-			AddCallbackButton("❎", "❎", "secondary")
-		kb.AddRow().
-			AddCallbackButton("…🔁", "…🔁", "secondary").
-			AddCallbackButton("…⏸️", "…⏸️", "secondary").
-			AddCallbackButton("…❌", "…❌", "secondary")
-		kb.AddRow().
-			AddCallbackButton("…✅❌", "…✅❌", "secondary").
-			AddCallbackButton("…❗❌", "…❗❌", "secondary").
-			AddCallbackButton("…⏸️❌", "…⏸️❌", "secondary")
-		return kb
-	}()
-
 	// single ip commands only, for status replies
 	kbIP = func() *object.MessagesKeyboard {
 		kb := object.NewMessagesKeyboardInline()
@@ -49,13 +31,19 @@ var (
 		return kb
 	}()
 
-	// group commands only, for pinnable messages
-	kbGroup = func() *object.MessagesKeyboard {
+	// group commands, for pinnable message 1
+	kbGroup1 = func() *object.MessagesKeyboard {
 		kb := object.NewMessagesKeyboardInline()
 		kb.AddRow().
 			AddCallbackButton("…🔁", "…🔁", "secondary").
 			AddCallbackButton("…⏸️", "…⏸️", "secondary").
 			AddCallbackButton("…❌", "…❌", "secondary")
+		return kb
+	}()
+
+	// group commands, for pinnable message 2
+	kbGroup2 = func() *object.MessagesKeyboard {
+		kb := object.NewMessagesKeyboardInline()
 		kb.AddRow().
 			AddCallbackButton("…✅❌", "…✅❌", "secondary").
 			AddCallbackButton("…❗❌", "…❗❌", "secondary").
@@ -73,18 +61,18 @@ func unpay(p json.RawMessage) string {
 	return string(p)
 }
 
-// send message with keyboard, replyTo is conversation message id or 0
+// send message with optional keyboard, replyTo is conversation message id or 0
 func sendKeyboard(peerID, replyTo int, text string, kbs ...*object.MessagesKeyboard) (id int, err error) {
-	k := kbIP
-	if len(kbs) > 0 && kbs[0] != nil {
-		k = kbs[0]
-	}
 	p := api.Params{
 		"peer_id":   peerID,
 		"message":   text,
-		"keyboard":  k.ToJSON(),
 		"random_id": 0,
 	}
+	if len(kbs) == 0 {
+		p["keyboard"] = kbIP.ToJSON()
+	} else if kbs[0] != nil {
+		p["keyboard"] = kbs[0].ToJSON()
+	} // nil - no keyboard
 	if replyTo > 0 {
 		// reply_to expects a global message id, which is 0 in community chat
 		// events, so use forward+is_reply with conversation_message_ids

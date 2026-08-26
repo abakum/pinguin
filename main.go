@@ -310,12 +310,24 @@ func bhAnyCommand(tm *object.MessagesMessage) error {
 			return nil
 		}
 	}
-	_, ups := allowed(tm.FromID, tm.PeerID)
+	if tm.PeerID == tm.FromID && chats.allowed(tm.FromID) {
+		// direct message from allowed peer - two pinnable control panels
+		_, err := sendKeyboard(tm.PeerID, msgID(tm), "…🔁 …⏸️ …❌", kbGroup1)
+		if err != nil {
+			let.Println(err)
+		}
+		_, err = sendKeyboard(tm.PeerID, msgID(tm), "…✅❌  …❗❌  …⏸️❌", kbGroup2)
+		if err != nil {
+			let.Println(err)
+		}
+		return nil
+	}
+	// group chats and strangers - plain text without keyboard
 	text := dic.add(ul,
 		"en:List of IP addresses expected\n",
 		"ru:Ожидался список IP адресов\n",
-	) + "/127.0.0.1 127.0.0.2 127.0.0.254" + ups
-	_, err := sendKeyboard(tm.PeerID, msgID(tm), text, kbGroup)
+	) + "/127.0.0.1 127.0.0.2 127.0.0.254"
+	_, err := sendKeyboard(tm.PeerID, msgID(tm), text, nil)
 	if err != nil {
 		let.Println(err)
 	}
