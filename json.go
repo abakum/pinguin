@@ -31,13 +31,12 @@ func loader() error {
 
 // save json
 func saver() {
-	defer wg.Done()
 	cus := customers{}
 	conf := config{&dic, &cus}
 	for {
 		select {
 		case <-saveDone:
-			// drain buffered save records before writing file
+			// all workers are done, drain buffered save records then write file
 			for {
 				select {
 				case cu := <-save:
@@ -47,22 +46,16 @@ func saver() {
 					bytes, err := json.Marshal(conf)
 					if err != nil {
 						PrintOk("", err)
-						return
+						break
 					}
 					err = os.WriteFile(tmbPingJson, bytes, 0644)
 					PrintOk("saver", err)
+					saverDone <- true
 					return
 				}
 			}
-		case cu, ok := <-save:
-			if ok {
-				cus = append(cus, cu)
-				// bytes, _ := json.Marshal(cu)
-				// stdo.Printf("%s\n", bytes)
-			} else {
-				ltf.Println("saver channel closed")
-				saveDone <- true
-			}
+		case cu := <-save:
+			cus = append(cus, cu)
 		}
 	}
 }

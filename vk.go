@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/SevereCloud/vksdk/v3/api"
 	"github.com/SevereCloud/vksdk/v3/object"
@@ -14,7 +16,11 @@ func CreateBot(token string) (*api.VK, error) {
 	if token == "" {
 		return nil, errors.New("set TOKEN=VK_COMMUNITY_TOKEN")
 	}
-	return api.NewVK(token), nil
+	vk := api.NewVK(token)
+	// http.DefaultClient has no timeout, a stalled request would block
+	// worker shutdown and prevent json save on Ctrl-C
+	vk.Client = &http.Client{Timeout: 30 * time.Second}
+	return vk, nil
 }
 
 // inline keyboards:
@@ -31,23 +37,34 @@ var (
 		return kb
 	}()
 
-	// group commands, for pinnable message 1
-	kbGroup1 = func() *object.MessagesKeyboard {
+	// group commands, for pinnable message
+	kbGroup = func() *object.MessagesKeyboard {
 		kb := object.NewMessagesKeyboardInline()
 		kb.AddRow().
 			AddCallbackButton("…🔁", "…🔁", "secondary").
 			AddCallbackButton("…⏸️", "…⏸️", "secondary").
 			AddCallbackButton("…❌", "…❌", "secondary")
-		return kb
-	}()
-
-	// group commands, for pinnable message 2
-	kbGroup2 = func() *object.MessagesKeyboard {
-		kb := object.NewMessagesKeyboardInline()
 		kb.AddRow().
 			AddCallbackButton("…✅❌", "…✅❌", "secondary").
 			AddCallbackButton("…❗❌", "…❗❌", "secondary").
 			AddCallbackButton("…⏸️❌", "…⏸️❌", "secondary")
+		return kb
+	}()
+
+	// group commands plus owner stop/restart, for pinnable message
+	kbOwner = func() *object.MessagesKeyboard {
+		kb := object.NewMessagesKeyboardInline()
+		kb.AddRow().
+			AddCallbackButton("…🔁", "…🔁", "secondary").
+			AddCallbackButton("…⏸️", "…⏸️", "secondary").
+			AddCallbackButton("…❌", "…❌", "secondary")
+		kb.AddRow().
+			AddCallbackButton("…✅❌", "…✅❌", "secondary").
+			AddCallbackButton("…❗❌", "…❗❌", "secondary").
+			AddCallbackButton("…⏸️❌", "…⏸️❌", "secondary")
+		kb.AddRow().
+			AddCallbackButton("⏹️🏓", "⏹️🏓", "secondary").
+			AddCallbackButton("⏹️🏓▶️", "⏹️🏓▶️", "secondary")
 		return kb
 	}()
 )

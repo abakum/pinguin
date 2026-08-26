@@ -31,12 +31,15 @@ func main() {
 			SendError(err)
 			defer os.Exit(1)
 		}
+		ltf.Println("closer stopH")
+		SendError(fmt.Errorf("stopH %v", stopH(ttCancel, bh)))
 		ltf.Println("closer mainCancel()")
 		mainCancel()
-		ltf.Println("closer ips.close")
-		ips.close()
+		// wait for all workers to push their records to save
 		wg.Wait()
-		// pressEnter()
+		// single flush signal: saver drains save and writes the file
+		saveDone <- true
+		<-saverDone
 	})
 	ul, err = jibber_jabber.DetectLanguage()
 	if err != nil {
@@ -75,7 +78,6 @@ func main() {
 		return
 	}
 
-	wg.Add(1)
 	go saver()
 
 	wg.Add(1)
@@ -194,29 +196,10 @@ func msgID(tm *object.MessagesMessage) int {
 
 // handler IP
 func bhAnyWithMatch(tc string, tm *object.MessagesMessage) error {
-	ok, ups := allowed(tm.FromID, tm.PeerID)
 	keys, _ := set(reIP.FindAllString(tc, -1))
 	ltf.Println("MessageNew anyWithIP", keys, tm.PeerID, tm.FromID, msgID(tm))
-	if ok {
-		for _, ip := range keys {
-			ips.write(ip, customer{PeerID: tm.PeerID, UserID: tm.FromID, MsgID: msgID(tm)})
-		}
-	} else {
-		news := ""
-		for _, ip := range keys {
-			if ips.read(ip) {
-				ips.write(ip, customer{PeerID: tm.PeerID, UserID: tm.FromID, MsgID: msgID(tm)})
-			} else {
-				news += ip + " "
-			}
-		}
-		if len(news) > 1 {
-			_, err := sendKeyboard(tm.PeerID, msgID(tm), "/"+strings.TrimRight(news, " ")+"\n"+ups)
-			if err != nil {
-				let.Println(err)
-			}
-		}
-		return nil
+	for _, ip := range keys {
+		ips.write(ip, customer{PeerID: tm.PeerID, UserID: tm.FromID, MsgID: msgID(tm)})
 	}
 	return nil
 }
@@ -250,6 +233,18 @@ func onMessageEvent(obj events.MessageEventObject) error {
 			err = deleteMessage(obj.PeerID, tm.ID)
 			if err != nil {
 				let.Println(err)
+			}
+		}
+		return nil
+	}
+
+	// owner-only stop/restart buttons
+	if Data == "⏹️🏓" || Data == "⏹️🏓▶️" {
+		if tm.PeerID > 0 && len(chats) > 0 && chats[:1].allowed(obj.UserID) {
+			if Data == "⏹️🏓" {
+				closer.Close()
+			} else {
+				restart(tacker, tt)
 			}
 		}
 		return nil
@@ -311,12 +306,12 @@ func bhAnyCommand(tm *object.MessagesMessage) error {
 		}
 	}
 	if tm.PeerID == tm.FromID && chats.allowed(tm.FromID) {
-		// direct message from allowed peer - two pinnable control panels
-		_, err := sendKeyboard(tm.PeerID, msgID(tm), "…🔁 …⏸️ …❌", kbGroup1)
-		if err != nil {
-			let.Println(err)
+		// direct message from allowed peer - pinnable control panel
+		kb := kbGroup
+		if len(chats) > 0 && chats[:1].allowed(tm.FromID) {
+			kb = kbOwner // first peer in args can also stop/restart
 		}
-		_, err = sendKeyboard(tm.PeerID, msgID(tm), "…✅❌  …❗❌  …⏸️❌", kbGroup2)
+		_, err := sendKeyboard(tm.PeerID, msgID(tm), "⠀", kb)
 		if err != nil {
 			let.Println(err)
 		}
@@ -365,19 +360,6 @@ func bhNewMember(tm *object.MessagesMessage) error {
 		let.Println(err)
 	}
 	return nil
-}
-
-// is key in args
-func allowed(peerIDs ...int) (ok bool, s string) {
-	s = "\n🏓"
-	for _, v := range peerIDs {
-		ok = chats.allowed(v)
-		if ok {
-			return
-		}
-	}
-	s = notAllowed(false, peerIDs[0], ul)
-	return
 }
 
 // message for peerID

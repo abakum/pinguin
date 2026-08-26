@@ -31,12 +31,13 @@ var (
 	bot         *api.VK
 	tt          = tth
 	save        = make(cCustomer, 1)
-	saveDone    = make(chan bool, 1)
+	saveDone    = make(chan bool)
+	saverDone   = make(chan bool)
 	tmbPingJson = "pinguin.json"
 	ticker,
 	tacker *time.Ticker
 	dic  = mss{}
-	reIP = regexp.MustCompile(numFL + `(\.(25[0-4]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){2}\.` + numFL)
+	reIP = regexp.MustCompile(numFL + `(\.(25[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){2}\.` + numFL)
 	ul   string
 	wg   sync.WaitGroup
 	bh   *longpoll.LongPoll
@@ -57,17 +58,6 @@ type mcCustomer map[string]cCustomer
 type sCustomer struct {
 	sync.RWMutex
 	mcCustomer
-	save bool
-}
-
-func (s *sCustomer) close() {
-	s.Lock()
-	s.save = true
-	s.Unlock()
-	if len(s.mcCustomer) == 0 {
-		saveDone <- true
-		ltf.Println("sCustomer.close saveDone <- true")
-	}
 }
 
 // remove ip from ping list
@@ -86,16 +76,13 @@ func (s *sCustomer) del(ip string, closed bool) {
 		if ticker != nil {
 			defer ticker.Reset(dd)
 		}
-		if s.save {
-			saveDone <- true
-			ltf.Println("del saveDone <- true")
-		}
 	}
 }
 
 // add ip to ping list
 func (s *sCustomer) add(ip string) (ch cCustomer) {
 	ltf.Println("sCustomer.add ", ip)
+	wg.Add(1)
 	ch = make(cCustomer, 10)
 	go worker(ip, ch)
 	s.Lock()
