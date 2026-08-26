@@ -13,11 +13,10 @@ GIT_COMMIT:=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 AUTHOR:=$(shell git config user.name 2>/dev/null || echo "unknown")
 
 # Numeric version parts (for Windows VS_VERSIONINFO); default 0 for non-numeric VERSION
-VERSION_MAJOR:=$(shell echo $(VERSION) | grep -oE '^[0-9]+' || echo 0)
-VERSION_MINOR:=$(shell echo $(VERSION) | grep -oE '^[0-9]+\.[0-9]+' | cut -d. -f2 || true)
-VERSION_PATCH:=$(shell echo $(VERSION) | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' | cut -d. -f3 || true)
-VERSION_MINOR:=$(if $(VERSION_MINOR),$(VERSION_MINOR),0)
-VERSION_PATCH:=$(if $(VERSION_PATCH),$(VERSION_PATCH),0)
+VER_NUM:=$(shell echo $(VERSION) | sed -E 's/^v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+VERSION_MAJOR:=$(if $(word 1,$(subst ., ,$(VER_NUM))),$(word 1,$(subst ., ,$(VER_NUM))),0)
+VERSION_MINOR:=$(if $(word 2,$(subst ., ,$(VER_NUM))),$(word 2,$(subst ., ,$(VER_NUM))),0)
+VERSION_PATCH:=$(if $(word 3,$(subst ., ,$(VER_NUM))),$(word 3,$(subst ., ,$(VER_NUM))),0)
 
 # Windows resources
 ICON=pinguin.png
@@ -34,7 +33,7 @@ help:
 	@echo "  make install  - install binary for current platform"
 	@echo "  make win      - build Windows executable (pinguin.exe) at latest tag"
 	@echo "  make ico      - generate $(ICO) from $(ICON)"
-	@echo "  make syso     - increment patch tag, then make win"
+	@echo "  make syso     - increment patch tag (vX.Y.Z), push tag to origin, then make win"
 	@echo "  make clean    - remove compiled files"
 	@echo "  make help     - show this help"
 
@@ -89,13 +88,14 @@ $(SYSO): versioninfo $(ICO)
 	go tool github.com/josephspurrier/goversioninfo/cmd/goversioninfo -o $(SYSO) $(VERSIONINFO)
 	@echo "Resource complete: $(SYSO)"
 
-# Increment patch part of the highest git tag, tag HEAD, then build pinguin.exe
+# Increment patch part of the highest git tag, tag HEAD as vX.Y.Z, push tag, then build pinguin.exe
 syso:
-	@base=$$(echo $(VERSION) | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || echo 0.0.0); \
+	@base=$$(echo $(VERSION) | sed -E 's/^v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/'); \
+		[ -n "$$base" ] || base=0.0.0; \
 		major=$${base%%.*}; rest=$${base#*.}; minor=$${rest%%.*}; patch=$${rest##*.}; \
-		next="$$major.$$minor.$$((patch+1))"; \
+		next="v$$major.$$minor.$$((patch+1))"; \
 		echo "Tagging $(GIT_COMMIT) as $$next"; \
-		git tag $$next && $(MAKE) win VERSION=$$next
+		git tag $$next && git push origin $$next && $(MAKE) win VERSION=$$next
 
 # Build Windows executable
 win: $(SYSO)
