@@ -2,5 +2,6 @@
 *.exe
 *.bat
 *.json
+*.syso
 pinguin
 
