@@ -54,6 +54,7 @@ func main() {
 			"en:%s: set pinguin_ids (and pinguin_token) via environment, .env or Windows Credential Manager\n",
 			"ru:%s: задайте pinguin_ids (и pinguin_token) в среде, .env или Windows Credential Manager\n",
 		), os.Args[0])
+		fatalWait(err)
 		return
 	} else {
 		li.Println(dic.add(ul,
@@ -61,16 +62,14 @@ func main() {
 			"ru:Разрешённые PeerID:",
 		), chats)
 	}
-	ex, err := os.Getwd()
-	if err == nil {
-		tmbPingJson = filepath.Join(ex, tmbPingJson)
-	}
+	tmbPingJson = filepath.Join(exeDir(), tmbPingJson)
 	li.Println(filepath.FromSlash(tmbPingJson))
 
 	bot, err = CreateBot(envValue("pinguin_token"))
 
 	if err != nil {
 		err = srcError(err)
+		fatalWait(err)
 		return
 	}
 
@@ -79,6 +78,7 @@ func main() {
 	bh, err = startH(ttCtx)
 	SendError(fmt.Errorf("startH %v", err))
 	if err != nil {
+		fatalWait(err)
 		return
 	}
 
@@ -114,6 +114,7 @@ func main() {
 
 	err = loader()
 	if err != nil {
+		fatalWait(err)
 		return
 	}
 	closer.Hold()

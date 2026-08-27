@@ -56,6 +56,7 @@ func runMeElevated() {
 
 	if ret <= 32 {
 		fmt.Printf("Error: Failed to elevate privileges (Code: %d)\n", ret)
+		fatalWait(nil)
 		os.Exit(1)
 	}
 }

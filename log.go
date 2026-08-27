@@ -76,3 +76,13 @@ func pressEnter() {
 	fmt.Print("Press Enter>")
 	fmt.Scanln()
 }
+
+// print fatal error and keep console open when running interactively
+func fatalWait(err error) {
+	if err != nil {
+		fmt.Println("fatal:", err)
+	}
+	if fi, statErr := os.Stdout.Stat(); statErr == nil && fi.Mode()&os.ModeCharDevice != 0 {
+		pressEnter()
+	}
+}
