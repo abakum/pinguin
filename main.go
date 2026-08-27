@@ -17,6 +17,7 @@ import (
 )
 
 func main() {
+	elevateIfNeeded()
 	mainCtx, mainCancel = context.WithCancel(context.Background())
 	ttCtx, ttCancel = context.WithCancel(mainCtx)
 	chats = NewAAA()

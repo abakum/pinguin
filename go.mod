@@ -10,6 +10,7 @@ require (
 	github.com/prometheus-community/pro-bing v0.9.1
 	github.com/xlab/closer v1.1.0
 	golang.org/x/image v0.45.0
+	golang.org/x/sys v0.47.0
 )
 
 require (
@@ -23,7 +24,6 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 )
 

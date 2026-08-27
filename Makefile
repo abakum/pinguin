@@ -79,11 +79,12 @@ versioninfo:
 		'    "ProductName": "pinguin",' \
 		'    "ProductVersion": "$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH) ($(GIT_COMMIT))"' \
 		'  },' \
-		'  "IconPath": "$(ICO)"' \
+		'  "IconPath": "$(ICO)",' \
+		'  "ManifestPath": "app.manifest"' \
 		'}' > $(VERSIONINFO)
 
 # Generate Windows resource file (icon + version info)
-$(SYSO): versioninfo $(ICO)
+$(SYSO): versioninfo $(ICO) app.manifest
 	@echo "Generating $(SYSO)..."
 	go tool github.com/josephspurrier/goversioninfo/cmd/goversioninfo -o $(SYSO) $(VERSIONINFO)
 	@echo "Resource complete: $(SYSO)"
