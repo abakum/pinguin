@@ -19,6 +19,7 @@ import (
 func main() {
 	mainCtx, mainCancel = context.WithCancel(context.Background())
 	ttCtx, ttCancel = context.WithCancel(mainCtx)
+	chats = NewAAA()
 
 	var (
 		err error
@@ -45,10 +46,12 @@ func main() {
 	if err != nil {
 		ul = "en"
 	}
+	// start saver before any error path: closer always waits for saverDone
+	go saver()
 	if len(chats) == 0 {
 		err = Errorf(dic.add(ul,
-			"en:Usage: %s AllowedPeerID1 AllowedPeerID2 AllowedPeerIDx\n",
-			"ru:Использование: %s РазрешённыйPeerID1 РазрешённыйPeerID2 РазрешённыйPeerIDх\n",
+			"en:%s: set pinguin_ids (and pinguin_token) via environment, .env or Windows Credential Manager\n",
+			"ru:%s: задайте pinguin_ids (и pinguin_token) в среде, .env или Windows Credential Manager\n",
 		), os.Args[0])
 		return
 	} else {
@@ -63,7 +66,7 @@ func main() {
 	}
 	li.Println(filepath.FromSlash(tmbPingJson))
 
-	bot, err = CreateBot(os.Getenv("TOKEN"))
+	bot, err = CreateBot(envValue("pinguin_token"))
 
 	if err != nil {
 		err = srcError(err)
@@ -77,8 +80,6 @@ func main() {
 	if err != nil {
 		return
 	}
-
-	go saver()
 
 	wg.Add(1)
 	// main loop

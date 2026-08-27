@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +20,7 @@ const (
 )
 
 var (
-	chats       = NewAAA()
+	chats       AAA
 	mainCtx     context.Context
 	mainCancel  context.CancelFunc
 	ttCtx       context.Context
@@ -155,16 +153,7 @@ func (a AAA) allowed(peerID int) bool {
 }
 
 func NewAAA() AAA {
-	chats := AAA{}
-	for _, s := range os.Args[1:] {
-		i, err := strconv.Atoi(s)
-		if err != nil {
-			continue
-		}
-		chats = append(chats, i)
-	}
-	return chats
-
+	return parseIDs(envValue("pinguin_ids"))
 }
 
 type mss map[string]string

@@ -14,7 +14,7 @@ import (
 // create VK community bot client from token
 func CreateBot(token string) (*api.VK, error) {
 	if token == "" {
-		return nil, errors.New("set TOKEN=VK_COMMUNITY_TOKEN")
+		return nil, errors.New("set pinguin_token=VK_COMMUNITY_TOKEN")
 	}
 	vk := api.NewVK(token)
 	// http.DefaultClient has no timeout, a stalled request would block

@@ -5,6 +5,8 @@ go 1.25.0
 require (
 	github.com/SevereCloud/vksdk/v3 v3.3.1
 	github.com/cloudfoundry/jibber_jabber v0.0.0-20151120183258-bcc4c8345a21
+	github.com/danieljoos/wincred v1.2.3
+	github.com/joho/godotenv v1.5.1
 	github.com/prometheus-community/pro-bing v0.9.1
 	github.com/xlab/closer v1.1.0
 	golang.org/x/image v0.45.0
