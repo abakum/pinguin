@@ -17,6 +17,14 @@ import (
 )
 
 func main() {
+	// one-shot send: pinguin <peerID> <message...>, longpoll not started
+	if len(os.Args) > 2 {
+		if err := cliSend(os.Args[1], strings.Join(os.Args[2:], " ")); err != nil {
+			fmt.Fprintln(os.Stderr, "fatal:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	elevateIfNeeded()
 	mainCtx, mainCancel = context.WithCancel(context.Background())
 	ttCtx, ttCancel = context.WithCancel(mainCtx)
@@ -81,6 +89,9 @@ func main() {
 		fatalWait(err)
 		return
 	}
+
+	// watch own messages sent from CLI
+	go poller()
 
 	wg.Add(1)
 	// main loop
@@ -164,6 +175,7 @@ func onMessageNew(tm *object.MessagesMessage) error {
 	if tm == nil {
 		return nil
 	}
+	pollSoon()
 	if tm.Action.Type != "" {
 		switch tm.Action.Type {
 		case "chat_kick_user":
@@ -189,6 +201,84 @@ func onMessageNew(tm *object.MessagesMessage) error {
 	return nil
 }
 
+// poll chat history for messages sent from CLI (VK longpoll does not emit
+// message_new for community's outgoing messages). CLI sends are marked with
+// a 🏓 prefix - only those get through.
+var lastMsg = map[int]int{}
+
+const cliMark = "🏓"
+
+func pollOwnMessages() {
+	for _, peer := range chats {
+		res, err := bot.MessagesGetHistory(api.Params{
+			"peer_id": peer,
+			"count":   10,
+		})
+		if err != nil {
+			let.Println("poll", peer, err)
+			continue
+		}
+		last, ok := lastMsg[peer]
+		for _, tm := range res.Items { // newest first
+			if tm.ID > lastMsg[peer] {
+				lastMsg[peer] = tm.ID
+			}
+			if !ok || tm.ID <= last { // first poll - baseline, or seen already
+				continue
+			}
+			if tm.FromID >= 0 || !strings.HasPrefix(tm.Text, cliMark) {
+				continue
+			}
+			ltf.Println("poll", peer, tm.ID, tm.FromID, "cli message:", tm.Text)
+			if reIP.MatchString(tm.Text) {
+				if err := bhAnyWithMatch(tm.Text, &tm); err != nil {
+					let.Println("poll subscribe", peer, err)
+				}
+			}
+		}
+	}
+}
+
+// watch messages sent from CLI: get history right after any longpoll event,
+// then refresh after idle; debounce event storms
+var (
+	pollReset = make(chan struct{}, 1)
+	lastPoll  time.Time
+)
+
+// pollSoon restarts the poll timer, call after any handled event
+func pollSoon() {
+	select {
+	case pollReset <- struct{}{}:
+	default:
+	}
+}
+
+func poller() {
+	ltf.Println("poller start:", "getHistory after last event, idle", refresh)
+	t := time.NewTimer(refresh)
+	defer t.Stop()
+	for {
+		select {
+		case <-mainCtx.Done():
+			ltf.Println("poller done")
+			return
+		case <-t.C:
+			pollOwnMessages()
+			lastPoll = time.Now()
+			t.Reset(refresh)
+		case <-pollReset:
+			if time.Since(lastPoll) < time.Second*5 {
+				t.Reset(time.Until(lastPoll.Add(time.Second * 5)))
+				continue
+			}
+			pollOwnMessages()
+			lastPoll = time.Now()
+			t.Reset(refresh)
+		}
+	}
+}
+
 // conversation message id of message, fallback to id
 func msgID(tm *object.MessagesMessage) int {
 	if tm.ConversationMessageID > 0 {
@@ -209,6 +299,7 @@ func bhAnyWithMatch(tc string, tm *object.MessagesMessage) error {
 
 // handler callback button
 func onMessageEvent(obj events.MessageEventObject) error {
+	pollSoon()
 	tm := convMessage(obj.PeerID, obj.ConversationMessageID)
 	if tm == nil {
 		return nil

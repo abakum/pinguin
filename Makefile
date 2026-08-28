@@ -27,11 +27,19 @@ SYSO=resource_windows_amd64.syso
 # Build flags
 LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.gitCommit=$(GIT_COMMIT)"
 
+# CLI sender: same source, own syso with asInvoker manifest
+# (icon and versioninfo kept, only admin elevation excluded)
+WINDOWS_PINGIT=pingit.exe
+PINGIT_SYSO=resource_pingit_windows_amd64.syso
+ADMIN_MANIFEST=app.manifest
+PINGIT_MANIFEST=app_noadmin.manifest
+MANIFEST?=$(ADMIN_MANIFEST)
+
 # Default target
 help:
 	@echo "Available targets:"
-	@echo "  make install  - install binary for current platform"
-	@echo "  make win      - build Windows executable (pinguin.exe) at latest tag"
+	@echo "  make install  - install binary for current platform (longpoll bot, also does CLI sends)"
+	@echo "  make win      - build Windows pinguin.exe (admin manifest) and pingit.exe (same source, no manifest)"
 	@echo "  make ico      - generate $(ICO) from $(ICON)"
 	@echo "  make syso     - increment patch tag (vX.Y.Z), push tag to origin, then make win"
 	@echo "  make clean    - remove compiled files"
@@ -79,9 +87,9 @@ versioninfo:
 		'    "ProductName": "pinguin",' \
 		'    "ProductVersion": "$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH) ($(GIT_COMMIT))"' \
 		'  },' \
-		'  "IconPath": "$(ICO)",' \
-		'  "ManifestPath": "app.manifest"' \
-		'}' > $(VERSIONINFO)
+	'  "IconPath": "$(ICO)",' \
+	'  "ManifestPath": "$(MANIFEST)"' \
+	'}' > $(VERSIONINFO)
 
 # Generate Windows resource file (icon + version info)
 $(SYSO): versioninfo $(ICO) app.manifest
@@ -98,14 +106,23 @@ syso:
 		echo "Tagging $(GIT_COMMIT) as $$next"; \
 		git tag $$next && git push origin $$next && $(MAKE) win VERSION=$$next
 
-# Build Windows executable
-win: $(SYSO)
-	@echo "Building for Windows (amd64)..."
+# Build Windows executables: pingit.exe with asInvoker syso (icon and
+# versioninfo kept, no admin elevation), then pinguin.exe with admin manifest
+win:
+	@echo "Building $(WINDOWS_PINGIT) (no admin manifest)..."
+	rm -f $(SYSO) $(PINGIT_SYSO)
+	@$(MAKE) versioninfo MANIFEST=$(PINGIT_MANIFEST)
+	go tool github.com/josephspurrier/goversioninfo/cmd/goversioninfo -o $(PINGIT_SYSO) $(VERSIONINFO)
+	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(WINDOWS_PINGIT)
+	rm -f $(PINGIT_SYSO)
+	@echo "Building $(WINDOWS_BINARY_NAME) (admin manifest)..."
+	@$(MAKE) versioninfo MANIFEST=$(ADMIN_MANIFEST)
+	go tool github.com/josephspurrier/goversioninfo/cmd/goversioninfo -o $(SYSO) $(VERSIONINFO)
 	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(WINDOWS_BINARY_NAME)
-	@echo "Build complete: $(WINDOWS_BINARY_NAME)"
+	@echo "Build complete: $(WINDOWS_BINARY_NAME), $(WINDOWS_PINGIT)"
 
 # Clean compiled files
 clean:
 	@echo "Cleaning..."
-	rm -f $(BINARY_NAME) $(WINDOWS_BINARY_NAME) $(ICO) $(VERSIONINFO) $(SYSO)
+	rm -f $(BINARY_NAME) pingit $(WINDOWS_BINARY_NAME) $(WINDOWS_PINGIT) $(ICO) $(VERSIONINFO) $(SYSO) $(PINGIT_SYSO)
 	@echo "Clean complete"

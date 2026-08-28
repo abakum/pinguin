@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/SevereCloud/vksdk/v3/api"
@@ -134,6 +135,31 @@ func convMessage(peerID, conversationMessageID int) *object.MessagesMessage {
 		return nil
 	}
 	return &res.Items[0]
+}
+
+// send plain CLI message, marked with 🏓 prefix so the poller of the
+// running instance can tell it from other bot messages
+func sendPlain(peerID int, text string) error {
+	_, err := bot.MessagesSend(api.Params{
+		"peer_id":   peerID,
+		"message":   cliMark + text,
+		"random_id": 0,
+	})
+	return srcError(err)
+}
+
+// one-shot send from command line: peerID arg, rest is message text
+func cliSend(peerArg, text string) error {
+	peerID, err := strconv.Atoi(peerArg)
+	if err != nil {
+		return srcError(fmt.Errorf("peer id %q: %w", peerArg, err))
+	}
+	b, err := CreateBot(envValue("pinguin_token"))
+	if err != nil {
+		return srcError(err)
+	}
+	bot = b
+	return sendPlain(peerID, text)
 }
 
 // send error message to first peerID in args
