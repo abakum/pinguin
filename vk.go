@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/SevereCloud/vksdk/v3/api"
@@ -99,6 +102,21 @@ func sendKeyboard(peerID, replyTo int, text string, kbs ...*object.MessagesKeybo
 	return bot.MessagesSend(p)
 }
 
+// status reply: answer to a CLI request by its global message id, or forward
+// the user request by conversation message id
+func sendStatusReply(cu customer, text string) (int, error) {
+	if cu.GlobalID > 0 {
+		return bot.MessagesSend(api.Params{
+			"peer_id":   cu.PeerID,
+			"message":   text,
+			"random_id": 0,
+			"reply_to":  cu.GlobalID,
+			"keyboard":  kbIP.ToJSON(),
+		})
+	}
+	return sendKeyboard(cu.PeerID, cu.MsgID, text)
+}
+
 // delete message by conversation message id
 func deleteMessage(peerID, messageID int) error {
 	_, err := bot.MessagesDelete(api.Params{
@@ -137,8 +155,9 @@ func convMessage(peerID, conversationMessageID int) *object.MessagesMessage {
 	return &res.Items[0]
 }
 
-// send plain CLI message, marked with 🏓 prefix so the poller of the
-// running instance can tell it from other bot messages
+// send plain CLI message; the running instance sees owner dialog sends as
+// message_reply longpoll events (outgoing community message), chat sends
+// are not delivered, so cliSend mirrors a trigger to the owner dialog
 func sendPlain(peerID int, text string) error {
 	_, err := bot.MessagesSend(api.Params{
 		"peer_id":   peerID,
@@ -148,18 +167,34 @@ func sendPlain(peerID int, text string) error {
 	return srcError(err)
 }
 
-// one-shot send from command line: peerID arg, rest is message text
-func cliSend(peerArg, text string) error {
-	peerID, err := strconv.Atoi(peerArg)
+// one-shot send from command line: first arg is the explicit trigger peer
+// id, second arg 0 for the trigger peer itself or a chat id for the target.
+// Only a marked trigger with the target peer id goes to the trigger peer -
+// the only peer where message_reply longpoll events fire; the running
+// instance picks it up instantly and all visible output goes to the target
+// peer
+func cliSend(args []string) error {
+	usage := fmt.Errorf("usage: %s <sourcePeerID> 0|<targetPeerID>|<targetChatID> messageWord1 ...", filepath.Base(os.Args[0]))
+	if len(args) < 3 {
+		return usage
+	}
+	trig, err := strconv.Atoi(args[0])
 	if err != nil {
-		return srcError(fmt.Errorf("peer id %q: %w", peerArg, err))
+		return fmt.Errorf("trigger peer id %q: %w\n%w", args[0], err, usage)
+	}
+	target := trig
+	if args[1] != "0" {
+		target, err = strconv.Atoi(args[1])
+		if err != nil {
+			return fmt.Errorf("peer id %q: %w\n%w", args[1], err, usage)
+		}
 	}
 	b, err := CreateBot(envValue("pinguin_token"))
 	if err != nil {
 		return srcError(err)
 	}
 	bot = b
-	return sendPlain(peerID, text)
+	return sendPlain(trig, strconv.Itoa(target)+" "+strings.Join(args[2:], " "))
 }
 
 // send service marker to first peerID, or the error itself with 💥 if any

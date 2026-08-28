@@ -40,7 +40,7 @@ func worker(ip string, ch cCustomer) {
 				deadline = time.Unix(cust.Deadline, 0)
 				cus = append(cus, cust)
 				ltf.Println("loaded ", ip, status, deadline)
-			} else if cust.MsgID == 0 { //update
+			} else if cust.Cmd != "" { //update from buttons, MsgID is 0
 			switch cust.Cmd {
 			case "⏸️":
 				deadline = time.Now().Add(-refresh)
@@ -89,7 +89,7 @@ func worker(ip string, ch cCustomer) {
 							let.Println(err)
 						}
 					}
-					cus[i].ReplyID, err = sendKeyboard(cu.PeerID, cu.MsgID, status+" "+ip)
+					cus[i].ReplyID, err = sendStatusReply(cu, status+" "+ip)
 					if err != nil {
 						letf.Println("send", ip, err)
 						ips.del(ip, false)

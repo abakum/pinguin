@@ -47,6 +47,7 @@ type customer struct {
 	PeerID   int    `json:"peer,omitempty"`   //chat or user peer id
 	UserID   int    `json:"user,omitempty"`   //user id of requester
 	MsgID    int    `json:"msg,omitempty"`    //conversation message id of request
+	GlobalID int    `json:"gid,omitempty"`    //global message id of CLI request
 	ReplyID  int    `json:"reply,omitempty"`  //conversation message id of status report
 	Cmd      string `json:"cmd,omitempty"`    //command or ip for load
 	Status   string `json:"status,omitempty"` //loaded status
