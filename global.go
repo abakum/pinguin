@@ -28,6 +28,7 @@ var (
 	ips         = sCustomer{mcCustomer: mcCustomer{}}
 	bot         *api.VK
 	tt          = tth
+	stopAt      int // unix time of the last stopH, persisted in pinguin.json
 	save        = make(cCustomer, 1)
 	saveDone    = make(chan bool)
 	saverDone   = make(chan bool)

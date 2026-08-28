@@ -65,7 +65,7 @@ var (
 			AddCallbackButton("…⏸️❌", "…⏸️❌", "secondary")
 		kb.AddRow().
 			AddCallbackButton("⏹️🏓", "⏹️🏓", "secondary").
-			AddCallbackButton("⏹️🏓▶️", "⏹️🏓▶️", "secondary")
+			AddCallbackButton("▶️🏓", "▶️🏓", "secondary")
 		return kb
 	}()
 )
@@ -160,6 +160,21 @@ func cliSend(peerArg, text string) error {
 	}
 	bot = b
 	return sendPlain(peerID, text)
+}
+
+// send service marker to first peerID, or the error itself with 💥 if any
+func sendStatus(marker string, err error) {
+	if err != nil {
+		SendError(err)
+		return
+	}
+	if bot != nil && len(chats) > 0 {
+		_, _ = bot.MessagesSend(api.Params{
+			"peer_id":   chats[0],
+			"message":   marker,
+			"random_id": 0,
+		})
+	}
 }
 
 // send error message to first peerID in args

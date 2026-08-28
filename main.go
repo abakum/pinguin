@@ -41,8 +41,10 @@ func main() {
 			SendError(err)
 			defer os.Exit(1)
 		}
+		// remember shutdown time for the catch-up queue on next start
+		stopAt = int(time.Now().Unix())
 		ltf.Println("closer stopH")
-		SendError(fmt.Errorf("stopH %v", stopH(ttCancel, bh)))
+		sendStatus("⏹️🏓", stopH(ttCancel, bh))
 		ltf.Println("closer mainCancel()")
 		mainCancel()
 		// wait for all workers to push their records to save
@@ -81,10 +83,19 @@ func main() {
 		return
 	}
 
+	err = loader()
+	if err != nil {
+		fatalWait(err)
+		return
+	}
+
+	// replay messages accumulated between stopAt and now (Telegram-like queue)
+	catchUp(int(time.Now().Unix()))
+
 	tacker = time.NewTicker(tt)
 	defer tacker.Stop()
 	bh, err = startH(ttCtx)
-	SendError(fmt.Errorf("startH %v", err))
+	sendStatus("▶️🏓", err)
 	if err != nil {
 		fatalWait(err)
 		return
@@ -111,10 +122,10 @@ func main() {
 				ips.update(customer{})
 			case t := <-tacker.C:
 				ltf.Println("Tack at", t)
-				SendError(fmt.Errorf("stopH %v", stopH(ttCancel, bh)))
+				sendStatus("⏹️🏓", stopH(ttCancel, bh))
 				ttCtx, ttCancel = context.WithCancel(mainCtx)
 				bh, err = startH(ttCtx)
-				SendError(fmt.Errorf("startH %v", err))
+				sendStatus("▶️🏓", err)
 				if err != nil {
 					letf.Println(err)
 					restart(tacker, tt)
@@ -123,11 +134,6 @@ func main() {
 		}
 	}()
 
-	err = loader()
-	if err != nil {
-		fatalWait(err)
-		return
-	}
 	closer.Hold()
 }
 
@@ -235,6 +241,42 @@ func pollOwnMessages() {
 					let.Println("poll subscribe", peer, err)
 				}
 			}
+		}
+	}
+}
+
+// replay messages accumulated between the last stopH and now for every peer
+// in chats (Telegram-like queue), run before longpoll starts
+func catchUp(startAt int) {
+	for _, peer := range chats {
+		res, err := bot.MessagesGetHistory(api.Params{
+			"peer_id": peer,
+			"count":   200,
+		})
+		if err != nil {
+			let.Println("catchUp", peer, err)
+			continue
+		}
+		n := 0
+		for _, tm := range res.Items { // newest first
+			if tm.ID > lastMsg[peer] {
+				lastMsg[peer] = tm.ID
+			}
+			if stopAt == 0 || tm.Date < stopAt || tm.Date > startAt {
+				continue
+			}
+			// skip own text without CLI mark (status reports carry IPs),
+			// invite/kick actions are replayed
+			if tm.Action.Type == "" && tm.FromID < 0 && !strings.HasPrefix(tm.Text, cliMark) {
+				continue
+			}
+			n++
+			if err := onMessageNew(&tm); err != nil {
+				let.Println("catchUp", peer, tm.ID, err)
+			}
+		}
+		if n > 0 {
+			ltf.Println("catchUp", peer, "replayed", n)
 		}
 	}
 }

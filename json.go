@@ -8,12 +8,13 @@ import (
 type config struct {
 	M *mss
 	C *customers
+	T *int // stopAt, unix time of the last stopH
 }
 
 // load json
 func loader() error {
 	cus := customers{}
-	conf := config{&dic, &cus}
+	conf := config{&dic, &cus, nil}
 	bytes, err := os.ReadFile(tmbPingJson)
 	if err != nil {
 		return srcError(err)
@@ -21,6 +22,9 @@ func loader() error {
 	err = json.Unmarshal(bytes, &conf)
 	if err != nil {
 		return srcError(err)
+	}
+	if conf.T != nil {
+		stopAt = *conf.T
 	}
 	for _, cu := range cus {
 		ltf.Println(cu)
@@ -32,7 +36,7 @@ func loader() error {
 // save json
 func saver() {
 	cus := customers{}
-	conf := config{&dic, &cus}
+	conf := config{&dic, &cus, &stopAt}
 	for {
 		select {
 		case <-saveDone:
