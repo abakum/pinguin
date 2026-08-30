@@ -40,7 +40,7 @@ func worker(ip string, ch cCustomer) {
 				deadline = time.Unix(cust.Deadline, 0)
 				cus = append(cus, cust)
 				ltf.Println("loaded ", ip, status, deadline)
-			} else if cust.MsgID == 0 { //update
+			} else if cust.MsgID == 0 && cust.GlobalID == 0 { //update from buttons
 				switch cust.Cmd {
 				case "⏸️":
 					deadline = time.Now().Add(-refresh)
