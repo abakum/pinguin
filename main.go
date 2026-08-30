@@ -340,6 +340,16 @@ func onMessageEvent(obj events.MessageEventObject) error {
 		return nil
 	}
 
+	// unsubscribe button on orphaned status messages: worker is gone,
+	// delete the message with buttons directly
+	if Data == "❌" && ips.count() == 0 {
+		if tm.ID > 0 {
+			if err := deleteMessage(obj.PeerID, tm.ID); err != nil {
+				let.Println(err)
+			}
+		}
+		return nil
+	}
 	if ips.count() == 0 {
 		return nil
 	}

@@ -40,12 +40,12 @@ func worker(ip string, ch cCustomer) {
 				deadline = time.Unix(cust.Deadline, 0)
 				cus = append(cus, cust)
 				ltf.Println("loaded ", ip, status, deadline)
-			} else if cust.Cmd != "" { //update from buttons, MsgID is 0
-			switch cust.Cmd {
-			case "⏸️":
-				deadline = time.Now().Add(-refresh)
-			case "🔁":
-				deadline = time.Now().Add(dd)
+			} else if cust.MsgID == 0 { //update
+				switch cust.Cmd {
+				case "⏸️":
+					deadline = time.Now().Add(-refresh)
+				case "🔁":
+					deadline = time.Now().Add(dd)
 				default:
 					if strings.HasSuffix(cust.Cmd, "❌") {
 						tsX := strings.TrimSuffix(cust.Cmd, "❌") // empty|pause|connect|disconnect
@@ -81,6 +81,9 @@ func worker(ip string, ch cCustomer) {
 				}
 			}
 			for i, cu := range cus {
+				if cu.PeerID == 0 { // guard against zero entries
+					continue
+				}
 				ltf.Println(i, cu.PeerID, cu.UserID, cu.MsgID, ip, cu.ReplyID, status, statusOld)
 				if cu.ReplyID == 0 || status != statusOld {
 					if cu.ReplyID != 0 {
