@@ -36,6 +36,20 @@ func worker(ip string, ch cCustomer) {
 				return
 			}
 			if cust.Cmd == ip && cust.Deadline > 0 { //load
+				if cust.MsgID != 0 {
+					ok, err := msgExists(cust.PeerID, cust.MsgID)
+					if err != nil {
+						let.Println("msgExists", cust, err)
+					} else if !ok {
+						ltf.Println("drop orphan", cust)
+						if cust.ReplyID != 0 {
+							if err := deleteMessage(cust.PeerID, cust.ReplyID); err != nil {
+								let.Println(err)
+							}
+						}
+						continue // request deleted, do not re-subscribe
+					}
+				}
 				status = cust.Status
 				deadline = time.Unix(cust.Deadline, 0)
 				cus = append(cus, cust)

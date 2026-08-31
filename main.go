@@ -91,6 +91,10 @@ func main() {
 		return
 	}
 
+	// delete orphaned bot answers at startup: replies whose ip is no longer
+	// monitored, or whose request message has been deleted
+	cleanupOrphans()
+
 	// replay messages accumulated between stopAt and now (Telegram-like queue)
 	catchUp(int(time.Now().Unix()))
 
@@ -272,6 +276,41 @@ func catchUp(startAt int) {
 		}
 		if n > 0 {
 			ltf.Println("catchUp", peer, "replayed", n)
+		}
+	}
+}
+
+// delete orphaned bot answers after load: status replies (bot messages with a
+// keyboard and an ip) whose ip is no longer monitored. Used at startup.
+func cleanupOrphans() {
+	for _, peer := range chats {
+		res, err := bot.MessagesGetHistory(api.Params{
+			"peer_id": peer,
+			"count":   200,
+		})
+		if err != nil {
+			let.Println("cleanupOrphans", peer, err)
+			continue
+		}
+		for _, tm := range res.Items { // newest first
+			if tm.FromID >= 0 { // bot messages only
+				continue
+			}
+			if strings.HasPrefix(tm.Text, cliMark) { // keep control-plane triggers
+				continue
+			}
+			ip := reIP.FindString(tm.Text)
+			if ip == "" || ips.read(ip) { // keep if the ip is monitored
+				continue
+			}
+			// messages.delete expects the global message id, not the
+			// conversation message id (see the ❎ branch in onMessageEvent)
+			if tm.ID > 0 {
+				ltf.Println("cleanupOrphans delete", peer, ip, tm.ID)
+				if err := deleteMessage(peer, tm.ID); err != nil {
+					let.Println(err)
+				}
+			}
 		}
 	}
 }

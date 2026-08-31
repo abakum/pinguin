@@ -155,6 +155,19 @@ func convMessage(peerID, conversationMessageID int) *object.MessagesMessage {
 	return &res.Items[0]
 }
 
+// report whether a conversation message still exists, separating a genuine
+// miss (false) from a network/API error (err != nil)
+func msgExists(peerID, conversationMessageID int) (bool, error) {
+	res, err := bot.MessagesGetByConversationMessageID(api.Params{
+		"peer_id":                  peerID,
+		"conversation_message_ids": []int{conversationMessageID},
+	})
+	if err != nil {
+		return false, err
+	}
+	return len(res.Items) > 0, nil
+}
+
 // send plain CLI message; the running instance sees owner dialog sends as
 // message_reply longpoll events (outgoing community message), chat sends
 // are not delivered, so cliSend mirrors a trigger to the owner dialog
