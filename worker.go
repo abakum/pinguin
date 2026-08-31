@@ -16,6 +16,15 @@ func worker(ip string, ch cCustomer) {
 	)
 	defer wg.Done()
 	defer ips.del(ip, false)
+	// unsubscribe a customer: delete its status reply, the same as the ❌
+	// button on that reply
+	unsub := func(cu customer) {
+		if cu.ReplyID != 0 {
+			if err := deleteReply(cu.PeerID, cu.ReplyID); err != nil {
+				let.Println(err)
+			}
+		}
+	}
 	for {
 		select {
 		case <-mainCtx.Done():
@@ -36,17 +45,13 @@ func worker(ip string, ch cCustomer) {
 				return
 			}
 			if cust.Cmd == ip && cust.Deadline > 0 { //load
-				if cust.MsgID != 0 {
-					ok, err := msgExists(cust.PeerID, cust.MsgID)
+				if cust.MsgID != 0 || cust.GlobalID != 0 {
+					ok, err := requestExists(cust)
 					if err != nil {
-						let.Println("msgExists", cust, err)
+						let.Println("requestExists", cust, err)
 					} else if !ok {
 						ltf.Println("drop orphan", cust)
-						if cust.ReplyID != 0 {
-							if err := deleteMessage(cust.PeerID, cust.ReplyID); err != nil {
-								let.Println(err)
-							}
-						}
+						unsub(cust)
 						continue // request deleted, do not re-subscribe
 					}
 				}
@@ -58,6 +63,30 @@ func worker(ip string, ch cCustomer) {
 				switch cust.Cmd {
 				case "⏸️":
 					deadline = time.Now().Add(-refresh)
+				case cmdVerify: // restart: re-verify that request messages still exist
+					kept := cus[:0]
+					for _, cu := range cus {
+						if cu.MsgID == 0 && cu.GlobalID == 0 {
+							kept = append(kept, cu)
+							continue
+						}
+						ok, err := requestExists(cu)
+						if err != nil {
+							let.Println("requestExists", cu, err) // API error - keep the subscriber
+							kept = append(kept, cu)
+						} else if !ok {
+							ltf.Println("drop orphan", cu)
+							unsub(cu)
+						} else {
+							kept = append(kept, cu)
+						}
+					}
+					cus = kept
+					if len(cus) == 0 {
+						ltf.Println("no subscribers", ip)
+						return // defer ips.del removes the ip from monitoring
+					}
+					continue
 				case "🔁":
 					deadline = time.Now().Add(dd)
 				default:
@@ -65,13 +94,8 @@ func worker(ip string, ch cCustomer) {
 						tsX := strings.TrimSuffix(cust.Cmd, "❌") // empty|pause|connect|disconnect
 						if tsX == "" || strings.HasSuffix(status, tsX) || strings.HasPrefix(status, tsX) || (strings.HasPrefix(status, "❗") && tsX == "❗") {
 							for _, cu := range cus {
-								ltf.Println("deleteMessage", cu)
-								if cu.ReplyID != 0 {
-									err = deleteMessage(cu.PeerID, cu.ReplyID)
-									if err != nil {
-										let.Println(err)
-									}
-								}
+								ltf.Println("unsubscribe", cu)
+								unsub(cu)
 							}
 							return
 						}
@@ -100,12 +124,7 @@ func worker(ip string, ch cCustomer) {
 				}
 				ltf.Println(i, cu.PeerID, cu.UserID, cu.MsgID, ip, cu.ReplyID, status, statusOld)
 				if cu.ReplyID == 0 || status != statusOld {
-					if cu.ReplyID != 0 {
-						err = deleteMessage(cu.PeerID, cu.ReplyID)
-						if err != nil {
-							let.Println(err)
-						}
-					}
+					unsub(cu)
 					cus[i].ReplyID, err = sendStatusReply(cu, status+" "+ip)
 					if err != nil {
 						letf.Println("send", ip, err)

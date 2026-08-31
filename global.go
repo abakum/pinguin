@@ -37,9 +37,12 @@ var (
 	tacker *time.Ticker
 	dic  = mss{}
 	reIP = regexp.MustCompile(numFL + `(\.(25[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){2}\.` + numFL)
-	ul   string
-	wg   sync.WaitGroup
-	bh   *longpoll.LongPoll
+	// status reply text is status+" "+ip where status is "✅" or "❗" with an
+	// optional "⏸️" suffix (worker.go); extend here if new statuses appear
+	reStatusReply = regexp.MustCompile(`^(✅|❗)(?:⏸️)?\s`)
+	ul            string
+	wg            sync.WaitGroup
+	bh            *longpoll.LongPoll
 )
 
 // ping customer, platform independent
@@ -48,7 +51,7 @@ type customer struct {
 	UserID   int    `json:"user,omitempty"`   //user id of requester
 	MsgID    int    `json:"msg,omitempty"`    //conversation message id of request
 	GlobalID int    `json:"gid,omitempty"`    //global message id of CLI request
-	ReplyID  int    `json:"reply,omitempty"`  //conversation message id of status report
+	ReplyID  int    `json:"reply,omitempty"`  //global message id of status report (from messages.send)
 	Cmd      string `json:"cmd,omitempty"`    //command or ip for load
 	Status   string `json:"status,omitempty"` //loaded status
 	Deadline int64  `json:"deadline,omitempty"`

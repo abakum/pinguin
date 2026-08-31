@@ -67,8 +67,8 @@ var (
 			AddCallbackButton("…❗❌", "…❗❌", "secondary").
 			AddCallbackButton("…⏸️❌", "…⏸️❌", "secondary")
 		kb.AddRow().
-			AddCallbackButton("⏹️🏓", "⏹️🏓", "secondary").
-			AddCallbackButton("▶️🏓", "▶️🏓", "secondary")
+			AddCallbackButton(cmdStop, cmdStop, "secondary").
+			AddCallbackButton(cmdRestart, cmdRestart, "secondary")
 		return kb
 	}()
 )
@@ -117,15 +117,32 @@ func sendStatusReply(cu customer, text string) (int, error) {
 	return sendKeyboard(cu.PeerID, cu.MsgID, text)
 }
 
-// delete message by conversation message id
+// delete message by global message id; VK reports per-id errors in the
+// response body with a 200 status, so inspect it too
 func deleteMessage(peerID, messageID int) error {
-	_, err := bot.MessagesDelete(api.Params{
+	res, err := bot.MessagesDelete(api.Params{
 		"peer_id":        peerID,
 		"message_ids":    messageID,
 		"delete_for_all": 1,
 		"spam":           0,
 	})
-	return err
+	ltf.Println("messages.delete", peerID, messageID, res, err)
+	if err != nil {
+		return err
+	}
+	for _, r := range res {
+		if r.Error != nil {
+			return fmt.Errorf("messages.delete %d: code %d", messageID, r.Error.Code)
+		}
+	}
+	return nil
+}
+
+// delete a status reply by its message id: ReplyID holds the global message
+// id returned by messages.send, which messages.delete accepts directly
+// (the conversation message id is a different number, see the delete log)
+func deleteReply(peerID, messageID int) error {
+	return deleteMessage(peerID, messageID)
 }
 
 // answer callback event with snackbar text
@@ -161,6 +178,27 @@ func msgExists(peerID, conversationMessageID int) (bool, error) {
 	res, err := bot.MessagesGetByConversationMessageID(api.Params{
 		"peer_id":                  peerID,
 		"conversation_message_ids": []int{conversationMessageID},
+	})
+	if err != nil {
+		return false, err
+	}
+	return len(res.Items) > 0, nil
+}
+
+// report whether the request message a reply is based on still exists;
+// cu must have MsgID != 0 or GlobalID != 0
+func requestExists(cu customer) (bool, error) {
+	if cu.MsgID != 0 {
+		return msgExists(cu.PeerID, cu.MsgID)
+	}
+	return msgExistsGlobal(cu.GlobalID)
+}
+
+// report whether a message with the given global id still exists, separating
+// a genuine miss (false) from a network/API error (err != nil)
+func msgExistsGlobal(globalID int) (bool, error) {
+	res, err := bot.MessagesGetByID(api.Params{
+		"message_ids": globalID, // peer_id must stay unset: with peer_id the API expects cmids instead
 	})
 	if err != nil {
 		return false, err

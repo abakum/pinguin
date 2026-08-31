@@ -249,6 +249,14 @@ func onMessageNew(tm *object.MessagesMessage) error {
 // in chats (Telegram-like queue), run before longpoll starts
 const cliMark = "🏓"
 
+// owner stop/restart button payloads, must match the kbOwner keyboard (vk.go)
+const (
+	cmdStop    = "⏹️🏓"
+	cmdRestart = "▶️🏓"
+
+	cmdVerify = "❓" // worker sentinel: re-verify that request messages still exist
+)
+
 func catchUp(startAt int) {
 	for _, peer := range chats {
 		res, err := bot.MessagesGetHistory(api.Params{
@@ -297,6 +305,9 @@ func cleanupOrphans() {
 				continue
 			}
 			if strings.HasPrefix(tm.Text, cliMark) { // keep control-plane triggers
+				continue
+			}
+			if !reStatusReply.MatchString(tm.Text) { // status replies only: ✅⏸️ 1.2.3.4 / ❗ 5.6.7.8 etc
 				continue
 			}
 			ip := reIP.FindString(tm.Text)
@@ -368,9 +379,9 @@ func onMessageEvent(obj events.MessageEventObject) error {
 	}
 
 	// owner-only stop/restart buttons
-	if Data == "⏹️🏓" || Data == "▶️🏓" {
+	if Data == cmdStop || Data == cmdRestart {
 		if tm.PeerID > 0 && len(chats) > 0 && chats[:1].allowed(obj.UserID) {
-			if Data == "⏹️🏓" {
+			if Data == cmdStop {
 				closer.Close()
 			} else {
 				restart(tacker, tt)
@@ -396,6 +407,7 @@ func onMessageEvent(obj events.MessageEventObject) error {
 		ips.update(customer{Cmd: strings.TrimPrefix(Data, "…")})
 	} else {
 		if ip == "" { // guard: an unknown non-group button must not spawn a broken worker
+			let.Println("unknown button", Data)
 			return nil
 		}
 		ips.write(ip, customer{Cmd: Data})
@@ -432,6 +444,12 @@ func restart(t *time.Ticker, d time.Duration) {
 		time.Sleep(time.Millisecond * 150)
 		t.Reset(d)
 	}
+	go func() {
+		// workers re-verify the requests of their subscribers and drop orphans
+		ips.update(customer{Cmd: cmdVerify})
+		// replies whose ip is no longer monitored
+		cleanupOrphans()
+	}()
 }
 
 // handler Command
