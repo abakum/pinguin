@@ -368,7 +368,7 @@ func onMessageEvent(obj events.MessageEventObject) error {
 	}
 
 	// owner-only stop/restart buttons
-	if Data == "⏹️🏓" || Data == "⏹️🏓▶️" {
+	if Data == "⏹️🏓" || Data == "▶️🏓" {
 		if tm.PeerID > 0 && len(chats) > 0 && chats[:1].allowed(obj.UserID) {
 			if Data == "⏹️🏓" {
 				closer.Close()
@@ -395,6 +395,9 @@ func onMessageEvent(obj events.MessageEventObject) error {
 	if strings.HasPrefix(Data, "…") {
 		ips.update(customer{Cmd: strings.TrimPrefix(Data, "…")})
 	} else {
+		if ip == "" { // guard: an unknown non-group button must not spawn a broken worker
+			return nil
+		}
 		ips.write(ip, customer{Cmd: Data})
 	}
 	return nil
