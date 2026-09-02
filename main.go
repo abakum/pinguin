@@ -45,8 +45,10 @@ func main() {
 		}
 		// remember shutdown time for the catch-up queue on next start
 		stopAt = int(time.Now().Unix())
+		// mark the group as stopped on a full bot stop (not on in-process restart)
+		setGroupDescription(descStopped)
 		ltf.Println("closer stopH")
-		sendStatus("⏹️🏓", stopH(ttCancel, bh))
+		sendStatus(cmdStop, stopH(ttCancel, bh))
 		ltf.Println("closer mainCancel()")
 		mainCancel()
 		// wait for all workers to push their records to save
@@ -101,11 +103,14 @@ func main() {
 	tacker = time.NewTicker(tt)
 	defer tacker.Stop()
 	bh, err = startH(ttCtx)
-	sendStatus("▶️🏓", err)
+	sendStatus(cmdRestart, err)
 	if err != nil {
 		fatalWait(err)
 		return
 	}
+	// mark the group as working only on a full process start (not on
+	// in-process restart, which never re-runs main)
+	setGroupDescription(descWorking)
 
 	wg.Add(1)
 	// main loop
@@ -125,10 +130,10 @@ func main() {
 				ips.update(customer{})
 			case t := <-tacker.C:
 				ltf.Println("Tack at", t)
-				sendStatus("⏹️🏓", stopH(ttCancel, bh))
+				sendStatus(cmdStop, stopH(ttCancel, bh))
 				ttCtx, ttCancel = context.WithCancel(mainCtx)
 				bh, err = startH(ttCtx)
-				sendStatus("▶️🏓", err)
+				sendStatus(cmdRestart, err)
 				if err != nil {
 					letf.Println(err)
 					restart(tacker, tt)
