@@ -40,20 +40,21 @@ var (
 	// status reply text is status+" "+ip where status is "✅" or "❗" with an
 	// optional "⏸️" suffix (worker.go); extend here if new statuses appear
 	reStatusReply = regexp.MustCompile(`^(✅|❗)(?:⏸️)?\s`)
-	ul            string
-	wg            sync.WaitGroup
-	bh            *longpoll.LongPoll
+	// author marker at end of status replies (see sendStatusReply):
+	// [id<N>|First Last] mention or #N fallback
+	reAuthor = regexp.MustCompile(`(?m)^(?:\[id(\d+)\|[^\]]*\]|#(\d+)\s*)$`)
+	ul       string
+	wg       sync.WaitGroup
+	bh       *longpoll.LongPoll
 )
 
 // ping customer, platform independent
 type customer struct {
-	PeerID   int    `json:"peer,omitempty"`   //chat or user peer id
-	UserID   int    `json:"user,omitempty"`   //user id of requester
-	MsgID    int    `json:"msg,omitempty"`    //conversation message id of request
-	GlobalID int    `json:"gid,omitempty"`    //global message id of CLI request
-	ReplyID  int    `json:"reply,omitempty"`  //global message id of status report (from messages.send)
-	Cmd      string `json:"cmd,omitempty"`    //command or ip for load
-	Status   string `json:"status,omitempty"` //loaded status
+	PeerID   int    `json:"peer,omitempty"`  //chat or user peer id
+	UserID   int    `json:"user,omitempty"`  //user id of requester
+	MsgID    int    `json:"msg,omitempty"`   //conversation message id of request
+	ReplyID  int    `json:"reply,omitempty"` //global message id of status report (from messages.send)
+	Cmd      string `json:"cmd,omitempty"`   //command or ip for load
 	Deadline int64  `json:"deadline,omitempty"`
 }
 type cCustomer chan customer

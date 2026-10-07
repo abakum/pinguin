@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/SevereCloud/vksdk/v3/api"
@@ -102,17 +103,12 @@ func sendKeyboard(peerID, replyTo int, text string, kbs ...*object.MessagesKeybo
 	return bot.MessagesSend(p)
 }
 
-// status reply: answer to a CLI request by its global message id, or forward
-// the user request by conversation message id
+// status reply: forward the request by conversation message id; the
+// requester is embedded as a trailing mention marker line,
+// onMessageEvent checks buttons against it
 func sendStatusReply(cu customer, text string) (int, error) {
-	if cu.GlobalID > 0 {
-		return bot.MessagesSend(api.Params{
-			"peer_id":   cu.PeerID,
-			"message":   text,
-			"random_id": 0,
-			"reply_to":  cu.GlobalID,
-			"keyboard":  kbIP.ToJSON(),
-		})
+	if cu.UserID > 0 {
+		text += "\n" + userMention(cu.UserID)
 	}
 	return sendKeyboard(cu.PeerID, cu.MsgID, text)
 }
@@ -156,6 +152,35 @@ func answerEvent(eventID string, userID, peerID int, text string) error {
 	return err
 }
 
+// resolved user names cache, id -> "First Last" (see userMention)
+var userNames sync.Map
+
+// clickable mention line for status replies: [id<N>|First Last], falls back
+// to #N when the name cannot be resolved (both are matched by reAuthor)
+func userMention(id int) string {
+	if v, ok := userNames.Load(id); ok {
+		return v.(string)
+	}
+	res, err := bot.UsersGet(api.Params{"user_ids": id})
+	switch {
+	case err != nil:
+		let.Println("users.get", id, err)
+	case len(res) == 0:
+		let.Println("users.get", id, "empty")
+	default:
+		u := res[0]
+		name := strings.TrimSpace(u.FirstName + " " + u.LastName)
+		if name != "" {
+			m := fmt.Sprintf("[id%d|%s]", id, name)
+			userNames.Store(id, m)
+			return m
+		}
+	}
+	m := fmt.Sprintf("#%d", id)
+	userNames.Store(id, m)
+	return m
+}
+
 // get bot message by conversation message id
 func convMessage(peerID, conversationMessageID int) *object.MessagesMessage {
 	res, err := bot.MessagesGetByConversationMessageID(api.Params{
@@ -172,6 +197,26 @@ func convMessage(peerID, conversationMessageID int) *object.MessagesMessage {
 	return &res.Items[0]
 }
 
+// conversation message id of a just sent message, by its global id from
+// messages.send: newest history scan; 0 when not found
+func convMsgByID(peerID, globalID int) int {
+	res, err := bot.MessagesGetHistory(api.Params{
+		"peer_id": peerID,
+		"count":   10,
+	})
+	if err != nil {
+		let.Println("convMsgByID", peerID, err)
+		return 0
+	}
+	for _, tm := range res.Items { // newest first
+		if tm.ID == globalID {
+			return tm.ConversationMessageID
+		}
+	}
+	let.Println("convMsgByID", peerID, globalID, "not found")
+	return 0
+}
+
 // report whether a conversation message still exists, separating a genuine
 // miss (false) from a network/API error (err != nil)
 func msgExists(peerID, conversationMessageID int) (bool, error) {
@@ -186,24 +231,9 @@ func msgExists(peerID, conversationMessageID int) (bool, error) {
 }
 
 // report whether the request message a reply is based on still exists;
-// cu must have MsgID != 0 or GlobalID != 0
+// cu must have MsgID != 0
 func requestExists(cu customer) (bool, error) {
-	if cu.MsgID != 0 {
-		return msgExists(cu.PeerID, cu.MsgID)
-	}
-	return msgExistsGlobal(cu.GlobalID)
-}
-
-// report whether a message with the given global id still exists, separating
-// a genuine miss (false) from a network/API error (err != nil)
-func msgExistsGlobal(globalID int) (bool, error) {
-	res, err := bot.MessagesGetByID(api.Params{
-		"message_ids": globalID, // peer_id must stay unset: with peer_id the API expects cmids instead
-	})
-	if err != nil {
-		return false, err
-	}
-	return len(res.Items) > 0, nil
+	return msgExists(cu.PeerID, cu.MsgID)
 }
 
 // send plain CLI message; the running instance sees owner dialog sends as

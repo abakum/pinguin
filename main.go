@@ -205,9 +205,10 @@ func startH(_ context.Context) (*lp.LongPoll, error) {
 			let.Println("reply request", target, err)
 			return
 		}
+		cmid := convMsgByID(target, reqID)
 		uniq, _ := set(reIP.FindAllString(body, -1))
 		for _, ip := range uniq {
-			ips.write(ip, customer{PeerID: target, UserID: tm.FromID, GlobalID: reqID})
+			ips.write(ip, customer{PeerID: target, UserID: tm.PeerID, MsgID: cmid})
 		}
 	})
 
@@ -357,8 +358,15 @@ func onMessageEvent(obj events.MessageEventObject) error {
 	}
 	Data := unpay(obj.Payload)
 	my := true
-	if obj.PeerID != obj.UserID && tm.ReplyMessage != nil {
-		my = obj.UserID == tm.ReplyMessage.FromID
+	if obj.PeerID != obj.UserID {
+		if m := reAuthor.FindStringSubmatch(tm.Text); m != nil {
+			// author marker appended to status replies (see sendStatusReply)
+			id, _ := strconv.Atoi(tf(m[1] != "", m[1], m[2]))
+			my = obj.UserID == id
+		} else if tm.ReplyMessage != nil {
+			// legacy replies without marker: the requester is the reply parent
+			my = obj.UserID == tm.ReplyMessage.FromID
+		}
 	}
 	ip := reIP.FindString(tm.Text)
 	if strings.HasPrefix(Data, "…") {

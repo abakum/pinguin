@@ -31,9 +31,8 @@ func worker(ip string, ch cCustomer) {
 			for i, cu := range cus {
 				cu.Cmd = ip
 				if i == 0 {
-					cu.Status = status
 					cu.Deadline = deadline.Unix()
-					ltf.Println("saved ", ip, status, deadline)
+					ltf.Println("saved ", ip, deadline)
 				}
 				save <- cu
 			}
@@ -45,7 +44,7 @@ func worker(ip string, ch cCustomer) {
 				return
 			}
 			if cust.Cmd == ip && cust.Deadline > 0 { //load
-				if cust.MsgID != 0 || cust.GlobalID != 0 {
+				if cust.MsgID != 0 {
 					ok, err := requestExists(cust)
 					if err != nil {
 						let.Println("requestExists", cust, err)
@@ -55,18 +54,17 @@ func worker(ip string, ch cCustomer) {
 						continue // request deleted, do not re-subscribe
 					}
 				}
-				status = cust.Status
 				deadline = time.Unix(cust.Deadline, 0)
 				cus = append(cus, cust)
-				ltf.Println("loaded ", ip, status, deadline)
-			} else if cust.MsgID == 0 && cust.GlobalID == 0 { //update from buttons
+				ltf.Println("loaded ", ip, deadline)
+			} else if cust.MsgID == 0 { //update from buttons
 				switch cust.Cmd {
 				case "⏸️":
 					deadline = time.Now().Add(-refresh)
 				case cmdVerify: // restart: re-verify that request messages still exist
 					kept := cus[:0]
 					for _, cu := range cus {
-						if cu.MsgID == 0 && cu.GlobalID == 0 {
+						if cu.MsgID == 0 {
 							kept = append(kept, cu)
 							continue
 						}

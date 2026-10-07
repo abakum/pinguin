@@ -11,13 +11,24 @@ type config struct {
 	T *int // stopAt, unix time of the last stopH
 }
 
-// load json
+// load json; a missing file is not an error: an empty one is created and
+// the bot keeps running from scratch
 func loader() error {
 	cus := customers{}
 	conf := config{&dic, &cus, nil}
 	bytes, err := os.ReadFile(tmbPingJson)
 	if err != nil {
-		return srcError(err)
+		if !os.IsNotExist(err) {
+			return srcError(err)
+		}
+		ltf.Println(tmbPingJson, "not found, starting empty")
+		if bytes, err = json.Marshal(conf); err != nil {
+			return srcError(err)
+		}
+		if err = os.WriteFile(tmbPingJson, bytes, 0644); err != nil {
+			return srcError(err)
+		}
+		return nil
 	}
 	err = json.Unmarshal(bytes, &conf)
 	if err != nil {
