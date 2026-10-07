@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -255,10 +256,12 @@ func onMessageNew(tm *object.MessagesMessage) error {
 // in chats (Telegram-like queue), run before longpoll starts
 const cliMark = "🏓"
 
-// owner stop/restart button payloads, must match the kbOwner keyboard (vk.go)
+// owner report/stop/restart button payloads, must match the kbOwner
+// keyboard (vk.go)
 const (
 	cmdStop    = "⏹️🏓"
 	cmdRestart = "▶️🏓"
+	cmdReport  = "…" // all hosts with statuses and authors
 
 	cmdVerify = "❓" // worker sentinel: re-verify that request messages still exist
 )
@@ -360,11 +363,12 @@ func onMessageEvent(obj events.MessageEventObject) error {
 	my := true
 	if obj.PeerID != obj.UserID {
 		if m := reAuthor.FindStringSubmatch(tm.Text); m != nil {
-			// author marker appended to status replies (see sendStatusReply)
-			id, _ := strconv.Atoi(tf(m[1] != "", m[1], m[2]))
+			// "Name @id<N>" marker appended to status replies, covers
+			// pingit requests too
+			id, _ := strconv.Atoi(m[1])
 			my = obj.UserID == id
 		} else if tm.ReplyMessage != nil {
-			// legacy replies without marker: the requester is the reply parent
+			// replies without marker: the requester is the reply parent
 			my = obj.UserID == tm.ReplyMessage.FromID
 		}
 	}
@@ -399,6 +403,18 @@ func onMessageEvent(obj events.MessageEventObject) error {
 			} else {
 				restart(tacker, tt)
 			}
+		}
+		return nil
+	}
+
+	// owner-only report button, intercepted before the "…" group commands
+	if Data == cmdReport {
+		if tm.PeerID > 0 && len(chats) > 0 && chats[:1].allowed(obj.UserID) {
+			go func() {
+				if _, err := sendKeyboard(obj.PeerID, obj.ConversationMessageID, hostsText(), nil); err != nil {
+					let.Println(err)
+				}
+			}()
 		}
 		return nil
 	}
@@ -500,6 +516,40 @@ func bhAnyCommand(tm *object.MessagesMessage) error {
 		let.Println(err)
 	}
 	return nil
+}
+
+// hosts report for the kbOwner panel: one line per host with status and
+// unique author mentions, sorted by ip, "∅" when nothing is monitored
+func hostsText() string {
+	hs := hosts.list()
+	if len(hs) == 0 {
+		return "∅"
+	}
+	keys := make([]string, 0, len(hs))
+	for ip := range hs {
+		keys = append(keys, ip)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, ip := range keys {
+		st := hs[ip]
+		seen := map[int]bool{}
+		var auth []string
+		for _, cu := range st.Cus {
+			if cu.PeerID == 0 || cu.UserID == 0 || seen[cu.UserID] {
+				continue
+			}
+			seen[cu.UserID] = true
+			name := userMention(cu.UserID)
+			if name == "" {
+				name = "@id" + strconv.Itoa(cu.UserID)
+			}
+			auth = append(auth, name)
+		}
+		line := strings.TrimSpace(st.Status+" "+ip) + tf(len(auth) > 0, " "+strings.Join(auth, ", "), "")
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // handler LeftChat

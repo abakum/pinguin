@@ -68,6 +68,7 @@ var (
 			AddCallbackButton("…❗❌", "…❗❌", "secondary").
 			AddCallbackButton("…⏸️❌", "…⏸️❌", "secondary")
 		kb.AddRow().
+			AddCallbackButton("…", "…", "secondary").
 			AddCallbackButton(cmdStop, cmdStop, "secondary").
 			AddCallbackButton(cmdRestart, cmdRestart, "secondary")
 		return kb
@@ -104,11 +105,14 @@ func sendKeyboard(peerID, replyTo int, text string, kbs ...*object.MessagesKeybo
 }
 
 // status reply: forward the request by conversation message id; the
-// requester is embedded as a trailing mention marker line,
-// onMessageEvent checks buttons against it
+// requester is embedded as a trailing "Name @id<N>" marker, parsed back
+// by reAuthor in onMessageEvent
 func sendStatusReply(cu customer, text string) (int, error) {
 	if cu.UserID > 0 {
-		text += "\n" + userMention(cu.UserID)
+		if name := userMention(cu.UserID); name != "" {
+			text += " " + name
+		}
+		text += " @id" + strconv.Itoa(cu.UserID)
 	}
 	return sendKeyboard(cu.PeerID, cu.MsgID, text)
 }
@@ -155,8 +159,9 @@ func answerEvent(eventID string, userID, peerID int, text string) error {
 // resolved user names cache, id -> "First Last" (see userMention)
 var userNames sync.Map
 
-// clickable mention line for status replies: [id<N>|First Last], falls back
-// to #N when the name cannot be resolved (both are matched by reAuthor)
+// plain user name for status replies and host reports: "First Last",
+// empty when the name cannot be resolved; no [idN|Name] mention to avoid
+// mention notification noise, ids travel in the @id<N> markers instead
 func userMention(id int) string {
 	if v, ok := userNames.Load(id); ok {
 		return v.(string)
@@ -171,14 +176,11 @@ func userMention(id int) string {
 		u := res[0]
 		name := strings.TrimSpace(u.FirstName + " " + u.LastName)
 		if name != "" {
-			m := fmt.Sprintf("[id%d|%s]", id, name)
-			userNames.Store(id, m)
-			return m
+			userNames.Store(id, name)
+			return name
 		}
 	}
-	m := fmt.Sprintf("#%d", id)
-	userNames.Store(id, m)
-	return m
+	return ""
 }
 
 // get bot message by conversation message id

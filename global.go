@@ -26,6 +26,7 @@ var (
 	ttCtx       context.Context
 	ttCancel    context.CancelFunc
 	ips         = sCustomer{mcCustomer: mcCustomer{}}
+	hosts       = sHosts{m: map[string]hostState{}}
 	bot         *api.VK
 	tt          = tth
 	stopAt      int // unix time of the last stopH, persisted in pinguin.json
@@ -40,9 +41,9 @@ var (
 	// status reply text is status+" "+ip where status is "✅" or "❗" with an
 	// optional "⏸️" suffix (worker.go); extend here if new statuses appear
 	reStatusReply = regexp.MustCompile(`^(✅|❗)(?:⏸️)?\s`)
-	// author marker at end of status replies (see sendStatusReply):
-	// [id<N>|First Last] mention or #N fallback
-	reAuthor = regexp.MustCompile(`(?m)^(?:\[id(\d+)\|[^\]]*\]|#(\d+)\s*)$`)
+	// author marker at the end of status replies (see sendStatusReply):
+	// @id<N> after the plain requester name
+	reAuthor = regexp.MustCompile(`@id(\d+)\s*$`)
 	ul       string
 	wg       sync.WaitGroup
 	bh       *longpoll.LongPoll
@@ -145,6 +146,42 @@ func (s *sCustomer) count() int {
 }
 
 type customers []customer
+
+// last worker status plus a copy of its subscribers (see sHosts)
+type hostState struct {
+	Status string
+	Cus    customers
+}
+
+// in-memory snapshot of monitored hosts, kept by workers next to ips
+type sHosts struct {
+	sync.RWMutex
+	m map[string]hostState
+}
+
+func (s *sHosts) set(ip, status string, cus customers) {
+	cp := make(customers, len(cus))
+	copy(cp, cus)
+	s.Lock()
+	defer s.Unlock()
+	s.m[ip] = hostState{Status: status, Cus: cp}
+}
+
+func (s *sHosts) del(ip string) {
+	s.Lock()
+	defer s.Unlock()
+	delete(s.m, ip)
+}
+
+func (s *sHosts) list() map[string]hostState {
+	s.RLock()
+	defer s.RUnlock()
+	m := make(map[string]hostState, len(s.m))
+	for ip, st := range s.m {
+		m[ip] = st
+	}
+	return m
+}
 
 type AAA []int
 

@@ -16,6 +16,7 @@ func worker(ip string, ch cCustomer) {
 	)
 	defer wg.Done()
 	defer ips.del(ip, false)
+	defer hosts.del(ip)
 	// unsubscribe a customer: delete its status reply, the same as the ❌
 	// button on that reply
 	unsub := func(cu customer) {
@@ -84,6 +85,7 @@ func worker(ip string, ch cCustomer) {
 						ltf.Println("no subscribers", ip)
 						return // defer ips.del removes the ip from monitoring
 					}
+					hosts.set(ip, status, cus)
 					continue
 				case "🔁":
 					deadline = time.Now().Add(dd)
@@ -130,6 +132,7 @@ func worker(ip string, ch cCustomer) {
 					}
 				}
 			}
+			hosts.set(ip, status, cus)
 		}
 	}
 }
