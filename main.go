@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/SevereCloud/vksdk/v3/api"
@@ -121,6 +123,11 @@ func main() {
 		defer ticker.Stop()
 		// tacker = time.NewTicker(tt)
 		defer tacker.Stop()
+		// loader() ran before ticker existed, so the refresh Reset in
+		// sCustomer.add was skipped: arm the period from the loaded hosts
+		if ips.count() > 0 {
+			ticker.Reset(refresh)
+		}
 		for {
 			select {
 			case <-mainCtx.Done():
@@ -129,13 +136,16 @@ func main() {
 			case t := <-ticker.C:
 				ltf.Println("Tick at", t)
 				ips.update(customer{})
+				// keep the period in step with the worker set instead of
+				// relying on the 0<->non-empty transitions in add/del
+				if ips.count() > 0 {
+					ticker.Reset(refresh)
+				} else {
+					ticker.Reset(dd)
+				}
 			case t := <-tacker.C:
 				ltf.Println("Tack at", t)
-				sendStatus(cmdStop, stopH(ttCancel, bh))
-				ttCtx, ttCancel = context.WithCancel(mainCtx)
-				bh, err = startH(ttCtx)
-				sendStatus(cmdRestart, err)
-				if err != nil {
+				if err := recycleLP(); err != nil {
 					letf.Println(err)
 					restart(tacker, tt)
 				}
@@ -160,8 +170,26 @@ func stopH(cancel context.CancelFunc, l *lp.LongPoll) (err error) {
 	return
 }
 
+// serialize longpoll recycling between the Tack case and superviseLP
+var lpMu sync.Mutex
+
+// revive backoff shared by superviseLP generations, guarded by lpMu
+var lpBackoff = time.Second * 3
+
+// stop the current longpoll and start a fresh one (2h Tack recycle and
+// crash recovery path)
+func recycleLP() (err error) {
+	lpMu.Lock()
+	defer lpMu.Unlock()
+	sendStatus(cmdStop, stopH(ttCancel, bh))
+	ttCtx, ttCancel = context.WithCancel(mainCtx)
+	bh, err = startH(ttCtx)
+	sendStatus(cmdRestart, err)
+	return err
+}
+
 // start handler and polling
-func startH(_ context.Context) (*lp.LongPoll, error) {
+func startH(ctx context.Context) (*lp.LongPoll, error) {
 	l, err := lp.NewLongPollCommunity(bot)
 	if err != nil {
 		return nil, srcError(err)
@@ -213,13 +241,47 @@ func startH(_ context.Context) (*lp.LongPoll, error) {
 		}
 	})
 
-	go func() {
-		if err := l.Run(); err != nil {
-			letf.Println("longpoll", err)
-		}
-	}()
+	go superviseLP(ctx, l)
 
 	return l, nil
+}
+
+// run the longpoll and revive it after failures: vksdk's RunWithContext
+// returns on any single a_check error (e.g. context deadline exceeded)
+// without an internal retry, which used to leave the bot unresponsive
+// until the next Tack
+func superviseLP(ctx context.Context, l *lp.LongPoll) {
+	const minBackoff, maxBackoff = time.Second * 3, time.Minute
+	started := time.Now()
+	err := l.RunWithContext(ctx)
+	if err == nil || errors.Is(err, context.Canceled) || ctx.Err() != nil {
+		if err != nil {
+			letf.Println("longpoll", err) // expected context canceled on Shutdown
+		}
+		return
+	}
+	letf.Println("longpoll", err)
+	// a generation that lived long retries quickly, a flapping one keeps
+	// the grown backoff from its predecessors
+	lpMu.Lock()
+	if time.Since(started) >= time.Minute {
+		lpBackoff = minBackoff
+	}
+	b := lpBackoff
+	lpBackoff = min(lpBackoff*2, maxBackoff)
+	lpMu.Unlock()
+	for mainCtx.Err() == nil {
+		time.Sleep(b)
+		if err := recycleLP(); err != nil {
+			letf.Println("recycleLP", err)
+			lpMu.Lock()
+			b = lpBackoff
+			lpBackoff = min(lpBackoff*2, maxBackoff)
+			lpMu.Unlock()
+			continue
+		}
+		return
+	}
 }
 
 // router instead of telegohandler predicates
