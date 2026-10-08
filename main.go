@@ -326,6 +326,10 @@ const (
 	cmdReport  = "…" // all hosts with statuses and authors
 
 	cmdVerify = "❓" // worker sentinel: re-verify that request messages still exist
+
+	// delay before the panel refresh after a group command, enough for
+	// workers to apply it and re-ping their hosts (ping timeout is ~0.6s)
+	panelDelay = time.Second * 2
 )
 
 func catchUp(startAt int) {
@@ -454,6 +458,11 @@ func onMessageEvent(obj events.MessageEventObject) error {
 				let.Println(err)
 			}
 		}
+		if ip != "" && ips.read(ip) {
+			// drop the presser's subscription too, so the hosts list keeps
+			// only interested peers; MsgID 0 routes it as a button command
+			ips.write(ip, customer{Cmd: "❎", PeerID: obj.PeerID, UserID: obj.UserID})
+		}
 		return nil
 	}
 
@@ -469,14 +478,11 @@ func onMessageEvent(obj events.MessageEventObject) error {
 		return nil
 	}
 
-	// owner-only report button, intercepted before the "…" group commands
+	// owner-only report button, intercepted before the "…" group commands:
+	// edit the panel reply in place with the hosts list, no separate answer
 	if Data == cmdReport {
 		if tm.PeerID > 0 && len(chats) > 0 && chats[:1].allowed(obj.UserID) {
-			go func() {
-				if _, err := sendKeyboard(obj.PeerID, obj.ConversationMessageID, hostsText(), nil); err != nil {
-					let.Println(err)
-				}
-			}()
+			go editPanel(obj.PeerID, obj.ConversationMessageID, obj.UserID)
 		}
 		return nil
 	}
@@ -496,6 +502,14 @@ func onMessageEvent(obj events.MessageEventObject) error {
 	}
 	if strings.HasPrefix(Data, "…") {
 		ips.update(customer{Cmd: strings.TrimPrefix(Data, "…")})
+		if tm.PeerID > 0 { // panel lives in a direct message only
+			// wait for the workers to apply the command and re-ping
+			// before refreshing the panel, unlike the instant … report
+			go func() {
+				time.Sleep(panelDelay)
+				editPanel(obj.PeerID, obj.ConversationMessageID, obj.UserID)
+			}()
+		}
 	} else {
 		if ip == "" { // guard: an unknown non-group button must not spawn a broken worker
 			let.Println("unknown button", Data)
@@ -578,6 +592,19 @@ func bhAnyCommand(tm *object.MessagesMessage) error {
 		let.Println(err)
 	}
 	return nil
+}
+
+// refresh the control panel reply ("⠀", a reply to "/") in place with the
+// current hosts list; the keyboard is rebuilt the same way as in
+// bhAnyCommand, messages.edit wipes it otherwise
+func editPanel(peerID, conversationMessageID, userID int) {
+	kb := kbGroup
+	if len(chats) > 0 && chats[:1].allowed(userID) {
+		kb = kbOwner
+	}
+	if err := editMessage(peerID, conversationMessageID, hostsText(), kb); err != nil {
+		let.Println(err)
+	}
 }
 
 // hosts report for the kbOwner panel: one line per host with status and

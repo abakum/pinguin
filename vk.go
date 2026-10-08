@@ -117,6 +117,21 @@ func sendStatusReply(cu customer, text string) (int, error) {
 	return sendKeyboard(cu.PeerID, cu.MsgID, text)
 }
 
+// edit own message text by conversation message id, keyboard must be
+// passed again or messages.edit wipes it
+func editMessage(peerID, conversationMessageID int, text string, kb *object.MessagesKeyboard) error {
+	p := api.Params{
+		"peer_id":                 peerID,
+		"conversation_message_id": conversationMessageID,
+		"message":                 text,
+	}
+	if kb != nil {
+		p["keyboard"] = kb.ToJSON()
+	}
+	_, err := bot.MessagesEdit(p)
+	return err
+}
+
 // delete message by global message id; VK reports per-id errors in the
 // response body with a 200 status, so inspect it too
 func deleteMessage(peerID, messageID int) error {

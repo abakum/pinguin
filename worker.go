@@ -87,7 +87,25 @@ func worker(ip string, ch cCustomer) {
 					}
 					hosts.set(ip, status, cus)
 					continue
-				case "🔁":
+				case "❎": // reply hidden by its author: drop that subscriber only,
+				// in every peer - the presser is the same person
+				kept := cus[:0]
+				for _, cu := range cus {
+					if cu.UserID == cust.UserID {
+						ltf.Println("unsubscribe", cu)
+						unsub(cu) // remove their replies in other peers too
+						continue
+					}
+					kept = append(kept, cu)
+				}
+				cus = kept
+				if len(cus) == 0 {
+					ltf.Println("no subscribers", ip)
+					return // defer ips.del removes the ip from monitoring
+				}
+				hosts.set(ip, status, cus)
+				continue
+			case "🔁":
 					deadline = time.Now().Add(dd)
 				default:
 					if strings.HasSuffix(cust.Cmd, "❌") {
