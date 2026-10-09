@@ -13,10 +13,8 @@ import (
 
 const (
 	numFL   = `(25[0-4]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[1-9])`
-	tth     = time.Hour * 2
+	tth     = time.Hour * 8
 	refresh = time.Second * 60
-	dd      = time.Hour * 8
-	ttm     = time.Minute * 10
 )
 
 var (
@@ -52,12 +50,11 @@ var (
 
 // ping customer, platform independent
 type customer struct {
-	PeerID   int    `json:"peer,omitempty"`  //chat or user peer id
-	UserID   int    `json:"user,omitempty"`  //user id of requester
-	MsgID    int    `json:"msg,omitempty"`   //conversation message id of request
-	ReplyID  int    `json:"reply,omitempty"` //global message id of status report (from messages.send)
-	Cmd      string `json:"cmd,omitempty"`   //command or ip for load
-	Deadline int64  `json:"deadline,omitempty"`
+	PeerID  int    `json:"peer,omitempty"`  //chat or user peer id
+	UserID  int    `json:"user,omitempty"`  //user id of requester
+	MsgID   int    `json:"msg,omitempty"`   //conversation message id of request
+	ReplyID int    `json:"reply,omitempty"` //global message id of status report (from messages.send)
+	Cmd     string `json:"cmd,omitempty"`   //command or ip for load
 }
 type cCustomer chan customer
 type mcCustomer map[string]cCustomer
@@ -80,7 +77,7 @@ func (s *sCustomer) del(ip string, closed bool) {
 	delete(s.mcCustomer, ip)
 	if len(s.mcCustomer) == 0 {
 		if ticker != nil {
-			defer ticker.Reset(dd)
+			defer ticker.Reset(tth)
 		}
 	}
 }

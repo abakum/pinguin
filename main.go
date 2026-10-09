@@ -119,7 +119,7 @@ func main() {
 	// main loop
 	go func() {
 		defer wg.Done()
-		ticker = time.NewTicker(dd)
+		ticker = time.NewTicker(tth)
 		defer ticker.Stop()
 		// tacker = time.NewTicker(tt)
 		defer tacker.Stop()
@@ -141,7 +141,7 @@ func main() {
 				if ips.count() > 0 {
 					ticker.Reset(refresh)
 				} else {
-					ticker.Reset(dd)
+					ticker.Reset(tth)
 				}
 			case t := <-tacker.C:
 				ltf.Println("Tack at", t)
