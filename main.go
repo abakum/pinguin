@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,9 +22,12 @@ import (
 )
 
 func main() {
-	// one-shot send: pinguin <sourcePeerID> 0|<targetPeerID>|<targetChatID>
-	// messageWord1 ..., longpoll not started
-	if len(os.Args) > 3 {
+	// all args are CIDR nets: run as a service restricted to those nets
+	if ns, ok := parseNets(os.Args[1:]); ok {
+		nets = ns
+	} else if len(os.Args) > 3 {
+		// one-shot send (pingit binary): pingit <sourcePeerID> 0|<targetPeerID>|<targetChatID>
+		// messageWord1 ..., longpoll not started
 		if err := cliSend(os.Args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "fatal:", err)
 			os.Exit(1)
@@ -162,6 +166,22 @@ func main() {
 // Moscow time, fixed UTC+3 without DST
 var msk = time.FixedZone("MSK", 3*60*60)
 
+// parse every arg as a CIDR net; ok only for a non-empty all-CIDR args -
+// the pinguin service launch form, anything else belongs to cliSend
+func parseNets(args []string) (ns []*net.IPNet, ok bool) {
+	if len(args) == 0 {
+		return nil, false
+	}
+	for _, a := range args {
+		_, n, err := net.ParseCIDR(a)
+		if err != nil {
+			return nil, false
+		}
+		ns = append(ns, n)
+	}
+	return ns, true
+}
+
 // press …⏸️ at 18:00 and …🔁 at 08:00 MSK: pause all workers for the
 // evening or resume them for the working day
 func workHours() {
@@ -255,9 +275,18 @@ func startH(ctx context.Context) (*lp.LongPoll, error) {
 			}
 		}
 		// CLI one-shot: for uniformity the request text is echoed to the
-		// target peer and the bot answers as a reply to it
+		// target peer and the bot answers as a reply to it; only ips from
+		// the configured nets are echoed and subscribed, outside ips are
+		// silently skipped (CLI, no help text)
 		ltf.Println("reply", target, "cli:", body)
-		if !reIP.MatchString(body) {
+		uniq, _ := set(reIP.FindAllString(body, -1))
+		inside := make([]string, 0, len(uniq))
+		for _, ip := range uniq {
+			if inNets(ip) {
+				inside = append(inside, ip)
+			}
+		}
+		if len(inside) == 0 {
 			return
 		}
 		reqID, err := bot.MessagesSend(api.Params{
@@ -270,8 +299,7 @@ func startH(ctx context.Context) (*lp.LongPoll, error) {
 			return
 		}
 		cmid := convMsgByID(target, reqID)
-		uniq, _ := set(reIP.FindAllString(body, -1))
-		for _, ip := range uniq {
+		for _, ip := range inside {
 			ips.write(ip, customer{PeerID: target, UserID: tm.PeerID, MsgID: cmid})
 		}
 	})
@@ -332,9 +360,6 @@ func onMessageNew(tm *object.MessagesMessage) error {
 			return bhNewMember(tm)
 		}
 		return nil
-	}
-	if tm.ReplyMessage != nil && tm.Text == "-" {
-		return bhReplyMessageIsMinus(tm)
 	}
 	tc := tm.Text
 	if tm.ReplyMessage != nil {
@@ -444,12 +469,27 @@ func msgID(tm *object.MessagesMessage) int {
 	return tm.ID
 }
 
-// handler IP
+// handler IP: ips from the configured nets are subscribed, the rest are
+// reported back with the help text
 func bhAnyWithMatch(tc string, tm *object.MessagesMessage) error {
 	keys, _ := set(reIP.FindAllString(tc, -1))
 	ltf.Println("MessageNew anyWithIP", keys, tm.PeerID, tm.FromID, msgID(tm))
+	var outside []string
 	for _, ip := range keys {
-		ips.write(ip, customer{PeerID: tm.PeerID, UserID: tm.FromID, MsgID: msgID(tm)})
+		if inNets(ip) {
+			ips.write(ip, customer{PeerID: tm.PeerID, UserID: tm.FromID, MsgID: msgID(tm)})
+		} else {
+			outside = append(outside, ip)
+		}
+	}
+	if len(outside) > 0 {
+		text := dic.add(ul,
+			"en:IP outside the nets: ",
+			"ru:IP вне сетей: ",
+		) + strings.Join(outside, ", ") + "\n" + helpText()
+		if _, err := sendKeyboard(tm.PeerID, msgID(tm), text, nil); err != nil {
+			let.Println(err)
+		}
 	}
 	return nil
 }
@@ -639,28 +679,6 @@ func foreignButton(obj events.MessageEventObject, tm *object.MessagesMessage, Da
 	}
 }
 
-// handler DeleteMessage
-func bhReplyMessageIsMinus(tm *object.MessagesMessage) error {
-	re := tm.ReplyMessage
-	id := re.ConversationMessageID
-	if id == 0 {
-		id = re.ID
-	}
-	err := deleteMessage(tm.PeerID, id)
-	if err != nil {
-		let.Println(err)
-		_, err = bot.MessagesEdit(api.Params{
-			"peer_id":    tm.PeerID,
-			"message_id": id,
-			"message":    "-",
-		})
-		if err != nil {
-			let.Println(err)
-		}
-	}
-	return nil
-}
-
 // send t.C then reset t
 func restart(t *time.Ticker, d time.Duration) {
 	if t != nil {
@@ -701,16 +719,48 @@ func bhAnyCommand(tm *object.MessagesMessage) error {
 		}
 		return nil
 	}
-	// group chats and strangers - plain text without keyboard
-	text := dic.add(ul,
-		"en:List of IP addresses expected\n",
-		"ru:Ожидался список IP адресов\n",
-	) + "/127.0.0.1 127.0.0.2 127.0.0.254"
-	_, err := sendKeyboard(tm.PeerID, msgID(tm), text, nil)
+	// group chats and strangers - plain help text without keyboard
+	_, err := sendKeyboard(tm.PeerID, msgID(tm), helpText(), nil)
 	if err != nil {
 		let.Println(err)
 	}
 	return nil
+}
+
+// help for "/" answers and rejected ips: how to subscribe and what the
+// reply buttons do; the nets line is appended only when nets are set, so
+// the translations carry no launch parameters
+func helpText() string {
+	s := dic.add(ul,
+		"en:Send a host description and its IP address (e.g. Localhost 127.0.0.1) to subscribe to ✅/❗ status.\nButtons under the reply:\n",
+		"ru:Отправьте описание и IP-адрес хоста (например: Локалхост 127.0.0.1) — подпишу вас на статус ✅/❗.\nКнопки под ответом:\n",
+	) + dic.add(ul,
+		"en:🔁 — resume checks (checks run every minute, a report only on ✅/❗ change)\n",
+		"ru:🔁 — возобновить проверки (проверки идут раз в минуту, отчёт — только при смене статуса ✅/❗)\n",
+	) + dic.add(ul,
+		"en:⏸️ — stop host checks and reports; the pause applies to all subscribers\n",
+		"ru:⏸️ — остановить проверки хоста и отчёты; пауза для всех подписчиков\n",
+	) + dic.add(ul,
+		"en:❌ — delete: the host is removed from monitoring for everyone, replies are deleted. Non-author: the subscription moves to you, the previous author is unsubscribed\n",
+		"ru:❌ — удалить: хост убирается из отслеживания для всех, ответы удаляются. Не-автору: подписка переходит к вам, прежний автор отписывается\n",
+	) + dic.add(ul,
+		"en:❎ — close: your reply is hidden and you are unsubscribed from the host in all chats, the host stays for others. Non-author: like ❌ — the subscription moves to you\n",
+		"ru:❎ — закрыть: ваш ответ скрывается и вы отписываетесь от хоста во всех чатах, для остальных хост остаётся. Не-автору: как у ❌ — подписка переходит к вам\n",
+	) + dic.add(ul,
+		"en:At 08:00 Moscow time all hosts are unpaused, at 18:00 paused.\n",
+		"ru:В 8:00 по Москве все хосты снимаются с ⏸️, в 18:00 ставятся.\n",
+	)
+	if len(nets) == 0 {
+		return s
+	}
+	cidrs := make([]string, 0, len(nets))
+	for _, n := range nets {
+		cidrs = append(cidrs, n.String())
+	}
+	return s + dic.add(ul,
+		"en:I ping hosts from the nets ",
+		"ru:Пингую хосты из сетей ",
+	) + strings.Join(cidrs, ", ") + "."
 }
 
 // refresh the control panel reply ("⠀", a reply to "/") in place with the

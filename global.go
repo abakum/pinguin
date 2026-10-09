@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"regexp"
 	"strings"
 	"sync"
@@ -46,7 +47,28 @@ var (
 	ul       string
 	wg       sync.WaitGroup
 	bh       *longpoll.LongPoll
+	// nets restricts monitored ips to these CIDRs; empty - any ip (see
+	// parseNets and inNets)
+	nets []*net.IPNet
 )
+
+// report whether the ip falls inside the configured nets; with no nets
+// configured every ip is allowed
+func inNets(ip string) bool {
+	if len(nets) == 0 {
+		return true
+	}
+	pi := net.ParseIP(ip)
+	if pi == nil {
+		return false
+	}
+	for _, n := range nets {
+		if n.Contains(pi) {
+			return true
+		}
+	}
+	return false
+}
 
 // ping customer, platform independent
 type customer struct {
