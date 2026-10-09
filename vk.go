@@ -121,9 +121,10 @@ func sendStatusReply(cu customer, text string) (int, error) {
 // passed again or messages.edit wipes it
 func editMessage(peerID, conversationMessageID int, text string, kb *object.MessagesKeyboard) error {
 	p := api.Params{
-		"peer_id":                 peerID,
-		"conversation_message_id": conversationMessageID,
-		"message":                 text,
+		"peer_id":                  peerID,
+		"conversation_message_id":  conversationMessageID,
+		"message":                  text,
+		"keep_forward_attachments": "1", // keep the reply/forward header on edit
 	}
 	if kb != nil {
 		p["keyboard"] = kb.ToJSON()
@@ -174,28 +175,40 @@ func answerEvent(eventID string, userID, peerID int, text string) error {
 // resolved user names cache, id -> "First Last" (see userMention)
 var userNames sync.Map
 
-// plain user name for status replies and host reports: "First Last",
-// empty when the name cannot be resolved; no [idN|Name] mention to avoid
-// mention notification noise, ids travel in the @id<N> markers instead
+// initials of the user name for status replies and host reports: "First
+// Last" -> "FL", empty when the name cannot be resolved; no [idN|Name]
+// mention to avoid mention notification noise, ids travel in the @id<N>
+// markers instead
 func userMention(id int) string {
+	name := ""
 	if v, ok := userNames.Load(id); ok {
-		return v.(string)
-	}
-	res, err := bot.UsersGet(api.Params{"user_ids": id})
-	switch {
-	case err != nil:
-		let.Println("users.get", id, err)
-	case len(res) == 0:
-		let.Println("users.get", id, "empty")
-	default:
-		u := res[0]
-		name := strings.TrimSpace(u.FirstName + " " + u.LastName)
-		if name != "" {
+		name = v.(string)
+	} else {
+		res, err := bot.UsersGet(api.Params{"user_ids": id})
+		switch {
+		case err != nil:
+			let.Println("users.get", id, err)
+		case len(res) == 0:
+			let.Println("users.get", id, "empty")
+		default:
+			name = strings.TrimSpace(res[0].FirstName + " " + res[0].LastName)
+			if name == "" {
+				return ""
+			}
 			userNames.Store(id, name)
-			return name
 		}
 	}
-	return ""
+	return initials(name)
+}
+
+// first letter of every word, uppercased: "Константин Абакумов" -> "КА"
+func initials(name string) string {
+	var b strings.Builder
+	for _, w := range strings.Fields(name) {
+		r := []rune(w)
+		b.WriteString(strings.ToUpper(string(r[0])))
+	}
+	return b.String()
 }
 
 // get bot message by conversation message id

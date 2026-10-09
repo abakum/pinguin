@@ -2,7 +2,6 @@ package main
 
 import (
 	"strings"
-	"time"
 )
 
 // send ip to ch for add it to ping list
@@ -11,8 +10,10 @@ func worker(ip string, ch cCustomer) {
 		err error
 		status,
 		statusOld string
-		deadline = time.Now().Add(dd)
-		cus      = customers{}
+		// not paused on start: the pause only comes from an actual ⏸️
+		// command, see workHours (…⏸️ at 18:00, …🔁 at 08:00 MSK)
+		paused bool
+		cus    = customers{}
 	)
 	defer wg.Done()
 	defer ips.del(ip, false)
@@ -29,12 +30,8 @@ func worker(ip string, ch cCustomer) {
 	for {
 		select {
 		case <-mainCtx.Done():
-			for i, cu := range cus {
+			for _, cu := range cus {
 				cu.Cmd = ip
-				if i == 0 {
-					cu.Deadline = deadline.Unix()
-					ltf.Println("saved ", ip, deadline)
-				}
 				save <- cu
 			}
 			ltf.Println("done", ip)
@@ -44,7 +41,7 @@ func worker(ip string, ch cCustomer) {
 				ltf.Println("channel closed", ip)
 				return
 			}
-			if cust.Cmd == ip && cust.Deadline > 0 { //load
+			if cust.Cmd == ip { //load
 				if cust.MsgID != 0 {
 					ok, err := requestExists(cust)
 					if err != nil {
@@ -55,13 +52,22 @@ func worker(ip string, ch cCustomer) {
 						continue // request deleted, do not re-subscribe
 					}
 				}
-				deadline = time.Unix(cust.Deadline, 0)
 				cus = append(cus, cust)
-				ltf.Println("loaded ", ip, deadline)
+				ltf.Println("loaded ", ip, paused)
 			} else if cust.MsgID == 0 { //update from buttons
 				switch cust.Cmd {
 				case "⏸️":
-					deadline = time.Now().Add(-refresh)
+					paused = true
+					if cust.ReplyID != 0 {
+						// foreign pause: the pressed reply was replaced
+						// with a protocol one by the presser; adopt it as
+						// the author's status reply (cust.UserID)
+						for i, cu := range cus {
+							if cu.UserID == cust.UserID {
+								cus[i].ReplyID = cust.ReplyID
+							}
+						}
+					}
 				case cmdVerify: // restart: re-verify that request messages still exist
 					kept := cus[:0]
 					for _, cu := range cus {
@@ -88,25 +94,25 @@ func worker(ip string, ch cCustomer) {
 					hosts.set(ip, status, cus)
 					continue
 				case "❎": // reply hidden by its author: drop that subscriber only,
-				// in every peer - the presser is the same person
-				kept := cus[:0]
-				for _, cu := range cus {
-					if cu.UserID == cust.UserID {
-						ltf.Println("unsubscribe", cu)
-						unsub(cu) // remove their replies in other peers too
-						continue
+					// in every peer - the presser is the same person
+					kept := cus[:0]
+					for _, cu := range cus {
+						if cu.UserID == cust.UserID {
+							ltf.Println("unsubscribe", cu)
+							unsub(cu) // remove their replies in other peers too
+							continue
+						}
+						kept = append(kept, cu)
 					}
-					kept = append(kept, cu)
-				}
-				cus = kept
-				if len(cus) == 0 {
-					ltf.Println("no subscribers", ip)
-					return // defer ips.del removes the ip from monitoring
-				}
-				hosts.set(ip, status, cus)
-				continue
-			case "🔁":
-					deadline = time.Now().Add(dd)
+					cus = kept
+					if len(cus) == 0 {
+						ltf.Println("no subscribers", ip)
+						return // defer ips.del removes the ip from monitoring
+					}
+					hosts.set(ip, status, cus)
+					continue
+				case "🔁":
+					paused = false
 				default:
 					if strings.HasSuffix(cust.Cmd, "❌") {
 						tsX := strings.TrimSuffix(cust.Cmd, "❌") // empty|pause|connect|disconnect
@@ -123,8 +129,8 @@ func worker(ip string, ch cCustomer) {
 				cus = append(cus, cust)
 			}
 			statusOld = status
-			ltf.Println(ip, cust, len(ch), status, time.Now().Before(deadline))
-			if time.Now().Before(deadline) {
+			ltf.Println(ip, cust, len(ch), status, paused)
+			if !paused {
 				status, err = ping(ip)
 				if err != nil {
 					status = "❗"
@@ -132,6 +138,14 @@ func worker(ip string, ch cCustomer) {
 					//return
 				}
 			} else {
+				if status == "" { // first cycle after start: seed the base
+					// status once, even when already paused by afterHours
+					status, err = ping(ip)
+					if err != nil {
+						status = "❗"
+						ltf.Println("ping", ip, err)
+					}
+				}
 				if !strings.HasSuffix(status, "⏸️") {
 					status += "⏸️"
 				}
@@ -141,6 +155,11 @@ func worker(ip string, ch cCustomer) {
 					continue
 				}
 				ltf.Println(i, cu.PeerID, cu.UserID, cu.MsgID, ip, cu.ReplyID, status, statusOld)
+				// foreign pause: the author's cu already points at the new
+				// protocol reply adopted above, keep it as is
+				if cust.Cmd == "⏸️" && cust.ReplyID != 0 && cu.ReplyID == cust.ReplyID {
+					continue
+				}
 				if cu.ReplyID == 0 || status != statusOld {
 					unsub(cu)
 					cus[i].ReplyID, err = sendStatusReply(cu, status+" "+ip)

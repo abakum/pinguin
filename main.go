@@ -153,7 +153,42 @@ func main() {
 		}
 	}()
 
+	// press …⏸️ at 18:00 and …🔁 at 08:00 Moscow time, same as the panel
+	go workHours()
+
 	closer.Hold()
+}
+
+// Moscow time, fixed UTC+3 without DST
+var msk = time.FixedZone("MSK", 3*60*60)
+
+// press …⏸️ at 18:00 and …🔁 at 08:00 MSK: pause all workers for the
+// evening or resume them for the working day
+func workHours() {
+	for {
+		n := time.Now().In(msk)
+		y, m, d := n.Date()
+		morning := time.Date(y, m, d, 8, 0, 0, 0, msk)
+		evening := time.Date(y, m, d, 18, 0, 0, 0, msk)
+		var next time.Time
+		cmd := "🔁"
+		switch {
+		case n.Before(morning):
+			next = morning
+		case n.Before(evening):
+			next, cmd = evening, "⏸️"
+		default:
+			next = morning.AddDate(0, 0, 1)
+		}
+		select {
+		case <-mainCtx.Done():
+			ltf.Println("workHours done")
+			return
+		case <-time.After(time.Until(next)):
+			ltf.Println("workHours", cmd)
+			ips.update(customer{Cmd: cmd})
+		}
+	}
 }
 
 // stop handler, polling
@@ -426,29 +461,37 @@ func onMessageEvent(obj events.MessageEventObject) error {
 		return nil
 	}
 	Data := unpay(obj.Payload)
-	my := true
-	if obj.PeerID != obj.UserID {
-		if m := reAuthor.FindStringSubmatch(tm.Text); m != nil {
-			// "Name @id<N>" marker appended to status replies, covers
-			// pingit requests too
-			id, _ := strconv.Atoi(m[1])
-			my = obj.UserID == id
-		} else if tm.ReplyMessage != nil {
-			// replies without marker: the requester is the reply parent
-			my = obj.UserID == tm.ReplyMessage.FromID
+	// reply author by the "Name @id<N>" marker only: replies without a
+	// marker have no author, their buttons (except 🔁) are ignored
+	authorID := 0
+	if m := reAuthor.FindStringSubmatch(tm.Text); m != nil {
+		// "@id<N>" as sent, or the "[id<N>|...]" mention VK re-renders it to
+		if m[1] != "" {
+			authorID, _ = strconv.Atoi(m[1])
+		} else {
+			authorID, _ = strconv.Atoi(m[2])
 		}
+	} else if tm.ReplyMessage != nil && tm.ReplyMessage.FromID > 0 {
+		// pre-marker replies never get re-tagged until the status
+		// changes: the requester is the reply parent; the bot itself
+		// (negative id) is not an author
+		authorID = tm.ReplyMessage.FromID
 	}
+	my := obj.PeerID == obj.UserID || obj.UserID == authorID
 	ip := reIP.FindString(tm.Text)
 	if strings.HasPrefix(Data, "…") {
 		ip = ""
 	}
-	ups := fmt.Sprintf("#%d%s", obj.UserID, notAllowed(my, 0, ul))
-	letf.Println("MessageEvent", Data, ups, tf(ips.count() == 0, "∅", ip+Data))
+	// foreign 🔁 works on any reply, ⏸️/❌/❎ need a marked one
+	allowed := my || Data == "🔁" || authorID > 0 && (Data == "⏸️" || Data == "❌" || Data == "❎")
+	ups := fmt.Sprintf("#%d%s", obj.UserID, notAllowed(allowed, 0, ul))
+	letf.Println("MessageEvent", Data, ups, tf(ips.count() == 0, "∅", ip+Data), "author", authorID, tm.Text)
 	err := answerEvent(obj.EventID, obj.UserID, obj.PeerID, ups+tf(ips.count() == 0, "∅", ip+Data))
 	if err != nil {
 		let.Println(err)
 	}
-	if !my {
+	if !my && Data != "🔁" { // foreign 🔁 goes the common way, no protocol
+		foreignButton(obj, tm, Data, ip, authorID)
 		return nil
 	}
 	if Data == "❎" {
@@ -518,6 +561,82 @@ func onMessageEvent(obj events.MessageEventObject) error {
 		ips.write(ip, customer{Cmd: Data})
 	}
 	return nil
+}
+
+// button press on someone else's status reply: ⏸️ edits the pressed reply
+// to a protocol line in place, ❌/❎ log a keyless protocol reply and hand
+// the subscription over to the presser
+func foreignButton(obj events.MessageEventObject, tm *object.MessagesMessage, Data, ip string, authorID int) {
+	if authorID <= 0 || ip == "" || !ips.read(ip) {
+		let.Println("foreign button ignored", Data, authorID, ip)
+		return
+	}
+	reqCmid := 0 // the original request, target for the presser's new reply
+	if tm.ReplyMessage != nil {
+		reqCmid = tm.ReplyMessage.ConversationMessageID
+	}
+	if reqCmid == 0 {
+		reqCmid = msgID(tm)
+	}
+	st := "" // status at tap time
+	if f := strings.Fields(tm.Text); len(f) > 0 {
+		st = f[0]
+	}
+	tap := fmt.Sprintf(" @id%d @id%d", obj.UserID, authorID)
+	switch Data {
+	case "⏸️":
+		// replace the pressed reply with a protocol one: a fresh send
+		// keeps the reply header, unlike messages.edit
+		text := strings.TrimSuffix(st, "⏸️") + "⏸️ " + ip + " " + userMention(obj.UserID) + tap
+		newID, err := sendKeyboard(obj.PeerID, reqCmid, text, kbIP)
+		if err != nil {
+			let.Println(err)
+		}
+		if tm.ID > 0 {
+			if err := deleteMessage(obj.PeerID, tm.ID); err != nil {
+				let.Println(err)
+			}
+		}
+		if err != nil || newID <= 0 {
+			ips.write(ip, customer{Cmd: Data, PeerID: obj.PeerID, UserID: obj.UserID})
+			return
+		}
+		// UserID is the author: the worker adopts the new protocol reply
+		// as the author's status reply and does not recreate it
+		ips.write(ip, customer{Cmd: Data, PeerID: obj.PeerID, UserID: authorID, ReplyID: newID})
+	case "❌", "❎":
+		if Data == "❎" && tm.ID > 0 { // same as the own-press branch
+			if err := deleteMessage(obj.PeerID, tm.ID); err != nil {
+				let.Println(err)
+			}
+		}
+		// protocol line without keyboard: explicit nil, or sendKeyboard
+		// attaches kbIP by default
+		if _, err := sendKeyboard(obj.PeerID, reqCmid, st+" "+ip+" "+Data+userMention(obj.UserID)+tap, nil); err != nil {
+			let.Println(err)
+		}
+		if reqCmid == 0 {
+			let.Println("subscription takeover skipped, no request cmid")
+			return
+		}
+		// subscribe the presser first so the worker never runs out of
+		// subscribers and the channel stays open, then unsubscribe the
+		// old ones
+		ips.write(ip, customer{PeerID: obj.PeerID, UserID: obj.UserID, MsgID: reqCmid})
+		if Data == "❌" {
+			old := hosts.list()[ip].Cus
+			if len(old) == 0 {
+				ips.write(ip, customer{Cmd: "❎", UserID: authorID})
+			}
+			for _, cu := range old {
+				if cu.UserID != 0 && cu.UserID != obj.UserID {
+					ips.write(ip, customer{Cmd: "❎", UserID: cu.UserID})
+				}
+			}
+		} else {
+			ips.write(ip, customer{Cmd: "❎", UserID: authorID})
+		}
+	}
 }
 
 // handler DeleteMessage

@@ -42,8 +42,9 @@ var (
 	// optional "⏸️" suffix (worker.go); extend here if new statuses appear
 	reStatusReply = regexp.MustCompile(`^(✅|❗)(?:⏸️)?\s`)
 	// author marker at the end of status replies (see sendStatusReply):
-	// @id<N> after the plain requester name
-	reAuthor = regexp.MustCompile(`@id(\d+)\s*$`)
+	// "Name @id<N>", which VK re-renders as a mention "[id<N>|...]" in the
+	// text fetched back from the API, so both forms are matched
+	reAuthor = regexp.MustCompile(`(?:@id(\d+)|\[id(\d+)\|[^\]]*\])\s*$`)
 	ul       string
 	wg       sync.WaitGroup
 	bh       *longpoll.LongPoll
