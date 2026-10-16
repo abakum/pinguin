@@ -70,19 +70,6 @@ func main() {
 	}
 	// start saver before any error path: closer always waits for saverDone
 	go saver()
-	if len(chats) == 0 {
-		err = Errorf(dic.add(ul,
-			"en:%s: set pinguin_ids (and pinguin_token) via environment, .env or Windows Credential Manager\n",
-			"ru:%s: задайте pinguin_ids (и pinguin_token) в среде, .env или Windows Credential Manager\n",
-		), os.Args[0])
-		fatalWait(err)
-		return
-	} else {
-		li.Println(dic.add(ul,
-			"en:Allowed PeerID:",
-			"ru:Разрешённые PeerID:",
-		), chats)
-	}
 	tmbPingJson = filepath.Join(exeDir(), tmbPingJson)
 	li.Println(filepath.FromSlash(tmbPingJson))
 
@@ -92,6 +79,26 @@ func main() {
 		err = srcError(err)
 		fatalWait(err)
 		return
+	}
+
+	if len(chats) == 0 {
+		// auto mode: no pinguin_ids - the owner is the community creator,
+		// every chat the bot is in is allowed; a failed detection (0) keeps
+		// the bot running without owner features
+		ownerID = initOwner()
+		owner := "not found"
+		if ownerID > 0 {
+			owner = strconv.Itoa(ownerID)
+		}
+		li.Println(dic.add(ul,
+			"en:no pinguin_ids, owner is the community creator:",
+			"ru:нет pinguin_ids, владелец — создатель сообщества:",
+		), owner)
+	} else {
+		li.Println(dic.add(ul,
+			"en:Allowed PeerID:",
+			"ru:Разрешённые PeerID:",
+		), chats)
 	}
 
 	err = loader()
@@ -267,7 +274,11 @@ func startH(ctx context.Context) (*lp.LongPoll, error) {
 		if tm.FromID >= 0 || !strings.HasPrefix(tm.Text, cliMark) {
 			return
 		}
-		target := chats[0]
+		target := ownerPeer()
+		if target == 0 {
+			let.Println("cli: no owner peer for the default target")
+			return
+		}
 		body := strings.TrimPrefix(tm.Text, cliMark)
 		if f, rest, ok := strings.Cut(body, " "); ok {
 			if n, err := strconv.Atoi(f); err == nil {
@@ -374,8 +385,9 @@ func onMessageNew(tm *object.MessagesMessage) error {
 	return nil
 }
 
-// replay messages accumulated between the last stopH and now for every peer
-// in chats (Telegram-like queue), run before longpoll starts
+// replay messages accumulated between the last stopH and now for every
+// peer from peers() (chats, or all conversations without pinguin_ids),
+// run before longpoll starts
 const cliMark = "🏓"
 
 // owner report/stop/restart button payloads, must match the kbOwner
@@ -393,7 +405,7 @@ const (
 )
 
 func catchUp(startAt int) {
-	for _, peer := range chats {
+	for _, peer := range peers() {
 		res, err := bot.MessagesGetHistory(api.Params{
 			"peer_id": peer,
 			"count":   200,
@@ -426,7 +438,7 @@ func catchUp(startAt int) {
 // delete orphaned bot answers after load: status replies (bot messages with a
 // keyboard and an ip) whose ip is no longer monitored. Used at startup.
 func cleanupOrphans() {
-	for _, peer := range chats {
+	for _, peer := range peers() {
 		res, err := bot.MessagesGetHistory(api.Params{
 			"peer_id": peer,
 			"count":   200,
@@ -551,7 +563,7 @@ func onMessageEvent(obj events.MessageEventObject) error {
 
 	// owner-only stop/restart buttons
 	if Data == cmdStop || Data == cmdRestart {
-		if tm.PeerID > 0 && len(chats) > 0 && chats[:1].allowed(obj.UserID) {
+		if tm.PeerID > 0 && isOwner(obj.UserID) {
 			if Data == cmdStop {
 				closer.Close()
 			} else {
@@ -564,7 +576,7 @@ func onMessageEvent(obj events.MessageEventObject) error {
 	// owner-only report button, intercepted before the "…" group commands:
 	// edit the panel reply in place with the hosts list, no separate answer
 	if Data == cmdReport {
-		if tm.PeerID > 0 && len(chats) > 0 && chats[:1].allowed(obj.UserID) {
+		if tm.PeerID > 0 && isOwner(obj.UserID) {
 			go editPanel(obj.PeerID, obj.ConversationMessageID, obj.UserID)
 		}
 		return nil
@@ -696,8 +708,8 @@ func restart(t *time.Ticker, d time.Duration) {
 
 // handler Command
 func bhAnyCommand(tm *object.MessagesMessage) error {
-	// For owner as first peerID in args
-	if tm.PeerID > 0 && len(chats) > 0 && chats[:1].allowed(tm.FromID) {
+	// For owner: /restart and /stop
+	if tm.PeerID > 0 && isOwner(tm.FromID) {
 		if strings.HasPrefix(tm.Text, "/restart") {
 			restart(tacker, tt)
 			return nil
@@ -707,11 +719,12 @@ func bhAnyCommand(tm *object.MessagesMessage) error {
 			return nil
 		}
 	}
-	if tm.PeerID == tm.FromID && chats.allowed(tm.FromID) {
-		// direct message from allowed peer - pinnable control panel
+	if tm.PeerID == tm.FromID && (chats.allowed(tm.FromID) || isOwner(tm.FromID)) {
+		// direct message from an allowed peer or the owner - pinnable
+		// control panel
 		kb := kbGroup
-		if len(chats) > 0 && chats[:1].allowed(tm.FromID) {
-			kb = kbOwner // first peer in args can also stop/restart
+		if isOwner(tm.FromID) {
+			kb = kbOwner // the owner can also stop/restart
 		}
 		_, err := sendKeyboard(tm.PeerID, msgID(tm), "⠀", kb)
 		if err != nil {
@@ -768,7 +781,7 @@ func helpText() string {
 // bhAnyCommand, messages.edit wipes it otherwise
 func editPanel(peerID, conversationMessageID, userID int) {
 	kb := kbGroup
-	if len(chats) > 0 && chats[:1].allowed(userID) {
+	if isOwner(userID) {
 		kb = kbOwner
 	}
 	if err := editMessage(peerID, conversationMessageID, hostsText(), kb); err != nil {
@@ -828,7 +841,8 @@ func bhLeftChat(tm *object.MessagesMessage) error {
 
 // handler NewMember
 func bhNewMember(tm *object.MessagesMessage) error {
-	if !chats.allowed(tm.PeerID) {
+	// with no pinguin_ids every chat is allowed
+	if len(chats) > 0 && !chats.allowed(tm.PeerID) {
 		return nil
 	}
 	ltf.Println(tm.Action.MemberID)

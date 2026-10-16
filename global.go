@@ -19,7 +19,10 @@ const (
 )
 
 var (
-	chats       AAA
+	chats AAA
+	// owner user id of the auto mode (no pinguin_ids): the community
+	// creator detected by initOwner; 0 - unknown, owner features off
+	ownerID     int
 	mainCtx     context.Context
 	mainCancel  context.CancelFunc
 	ttCtx       context.Context
@@ -77,6 +80,10 @@ type customer struct {
 	MsgID   int    `json:"msg,omitempty"`   //conversation message id of request
 	ReplyID int    `json:"reply,omitempty"` //global message id of status report (from messages.send)
 	Cmd     string `json:"cmd,omitempty"`   //command or ip for load
+	// last known status ("✅"/"❗" with optional ⏸️): saved with the
+	// customer and restored on load, so a restart keeps the replies of
+	// hosts whose status did not change
+	Status string `json:"status,omitempty"`
 }
 type cCustomer chan customer
 type mcCustomer map[string]cCustomer
@@ -217,6 +224,34 @@ func (a AAA) allowed(peerID int) bool {
 
 func NewAAA() AAA {
 	return parseIDs(envValue("pinguin_ids"))
+}
+
+// report whether the user may use owner features: the first pinguin_ids
+// entry, or the community creator when pinguin_ids is not set
+func isOwner(userID int) bool {
+	if len(chats) > 0 {
+		return chats[:1].allowed(userID)
+	}
+	return userID > 0 && userID == ownerID
+}
+
+// peers to replay and clean up: the configured chats, or every
+// conversation plus the peers of current subscriptions when pinguin_ids
+// is not set
+func peers() []int {
+	if len(chats) > 0 {
+		return chats
+	}
+	all := conversations()
+	for _, st := range hosts.list() {
+		for _, cu := range st.Cus {
+			if cu.PeerID > 0 {
+				all = append(all, cu.PeerID)
+			}
+		}
+	}
+	uniq, _ := set(all)
+	return uniq
 }
 
 type mss map[string]string

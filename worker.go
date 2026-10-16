@@ -27,11 +27,27 @@ func worker(ip string, ch cCustomer) {
 			}
 		}
 	}
+	// upsert a subscription: an entry with the same peer+user is replaced -
+	// its old status reply is deleted (see unsub), the new request takes its
+	// place; catches re-triggers and duplicate loads of the same host
+	upsert := func(cust customer) {
+		kept := cus[:0]
+		for _, cu := range cus {
+			if cu.PeerID == cust.PeerID && cu.UserID == cust.UserID {
+				ltf.Println("resubscribe", cu)
+				unsub(cu)
+				continue
+			}
+			kept = append(kept, cu)
+		}
+		cus = append(kept, cust)
+	}
 	for {
 		select {
 		case <-mainCtx.Done():
 			for _, cu := range cus {
 				cu.Cmd = ip
+				cu.Status = status
 				save <- cu
 			}
 			ltf.Println("done", ip)
@@ -52,7 +68,13 @@ func worker(ip string, ch cCustomer) {
 						continue // request deleted, do not re-subscribe
 					}
 				}
-				cus = append(cus, cust)
+				if cust.Status != "" && status == "" {
+					// restore the saved status: the first ping is compared
+					// against it, so an unchanged status keeps the restored
+					// reply as is - no delete+resend notification noise
+					status = cust.Status
+				}
+				upsert(cust)
 				ltf.Println("loaded ", ip, paused)
 			} else if cust.MsgID == 0 { //update from buttons
 				switch cust.Cmd {
@@ -126,7 +148,7 @@ func worker(ip string, ch cCustomer) {
 					}
 				}
 			} else { //subscribe
-				cus = append(cus, cust)
+				upsert(cust)
 			}
 			statusOld = status
 			ltf.Println(ip, cust, len(ch), status, paused)

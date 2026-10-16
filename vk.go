@@ -266,6 +266,86 @@ func requestExists(cu customer) (bool, error) {
 	return msgExists(cu.PeerID, cu.MsgID)
 }
 
+// community creator: groups.getById with a community token returns the
+// token's own group (the same way vksdk NewLongPollCommunity does), then
+// groups.getMembers filter=managers lists management roles
+func detectOwner() (int, error) {
+	res, err := bot.GroupsGetByID(nil)
+	if err != nil {
+		return 0, srcError(err)
+	}
+	if len(res.Groups) == 0 {
+		return 0, errors.New("groups.getById: empty")
+	}
+	mans, err := bot.GroupsGetMembersFilterManagers(api.Params{
+		"group_id": res.Groups[0].ID,
+	})
+	if err != nil {
+		return 0, srcError(err)
+	}
+	for _, m := range mans.Items {
+		if m.Role == "creator" {
+			return m.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("groups.getMembers: no creator among %d managers", len(mans.Items))
+}
+
+// detect the owner with retries; 0 (not fatal) keeps the bot running
+// without owner features, see the auto mode in main
+func initOwner() int {
+	for _, pause := range []time.Duration{0, time.Second, 5 * time.Second} {
+		time.Sleep(pause)
+		id, err := detectOwner()
+		if err == nil {
+			li.Println("community creator", id)
+			return id
+		}
+		letf.Println("detectOwner", err)
+	}
+	letf.Println("creator not found, owner features disabled")
+	return 0
+}
+
+// all conversation peer ids (chats and direct messages) known to the
+// community, paginated; errors are logged, whatever was collected is
+// returned
+func conversations() []int {
+	var (
+		ps     []int
+		offset int
+	)
+	for {
+		res, err := bot.MessagesGetConversations(api.Params{
+			"count":  200,
+			"offset": offset,
+		})
+		if err != nil {
+			let.Println("getConversations", err)
+			break
+		}
+		for _, it := range res.Items {
+			if id := it.Conversation.Peer.ID; id > 0 {
+				ps = append(ps, id)
+			}
+		}
+		offset += len(res.Items)
+		if len(res.Items) == 0 || offset >= res.Count {
+			break
+		}
+	}
+	return ps
+}
+
+// owner peer for service messages and the CLI default: the first
+// pinguin_ids entry, or the detected creator; 0 - nowhere to send
+func ownerPeer() int {
+	if len(chats) > 0 {
+		return chats[0]
+	}
+	return ownerID
+}
+
 // send plain CLI message; the running instance sees owner dialog sends as
 // message_reply longpoll events (outgoing community message), chat sends
 // are not delivered, so cliSend mirrors a trigger to the owner dialog
@@ -308,26 +388,27 @@ func cliSend(args []string) error {
 	return sendPlain(trig, strconv.Itoa(target)+" "+strings.Join(args[2:], " "))
 }
 
-// send service marker to first peerID, or the error itself with 💥 if any
+// send service marker to the owner peer, or the error itself with 💥 if any
 func sendStatus(marker string, err error) {
 	if err != nil {
 		SendError(err)
 		return
 	}
-	if bot != nil && len(chats) > 0 {
+	if p := ownerPeer(); bot != nil && p > 0 {
 		_, _ = bot.MessagesSend(api.Params{
-			"peer_id":   chats[0],
+			"peer_id":   p,
 			"message":   marker,
 			"random_id": 0,
 		})
 	}
 }
 
-// send error message to first peerID in args
+// send error message to the owner peer: the first pinguin_ids entry or
+// the detected creator
 func SendError(err error) {
-	if bot != nil && len(chats) > 0 && err != nil {
+	if p := ownerPeer(); bot != nil && p > 0 && err != nil {
 		_, _ = bot.MessagesSend(api.Params{
-			"peer_id":   chats[0],
+			"peer_id":   p,
 			"message":   "💥 " + err.Error(),
 			"random_id": 0,
 		})

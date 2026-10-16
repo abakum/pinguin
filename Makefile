@@ -1,6 +1,6 @@
 # Makefile for pinguin
 
-.PHONY: install win ico syso versioninfo clean help
+.PHONY: install win mips pi2 pi3 ico syso versioninfo clean help
 
 # Binary name
 BINARY_NAME=pinguin
@@ -40,6 +40,9 @@ help:
 	@echo "Available targets:"
 	@echo "  make install  - install binary for current platform (longpoll bot, also does CLI sends)"
 	@echo "  make win      - build Windows pinguin.exe (admin manifest) and pingit.exe (same source, no manifest)"
+	@echo "  make mips     - build linux/mips pinguin (CGO off, softfloat, for LEDE/OpenWrt routers)"
+	@echo "  make pi2      - build linux/armv7 pinguin-armv7 (Raspberry Pi 2 and other 32-bit ARMv7 boards)"
+	@echo "  make pi3      - build linux/arm64 pinguin-arm64 (Raspberry Pi 3/4/5 with 64-bit OS)"
 	@echo "  make ico      - generate $(ICO) from $(ICON)"
 	@echo "  make syso     - increment patch tag (vX.Y.Z), push tag to origin, then make win"
 	@echo "  make clean    - remove compiled files"
@@ -121,8 +124,24 @@ win:
 	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(WINDOWS_BINARY_NAME)
 	@echo "Build complete: $(WINDOWS_BINARY_NAME), $(WINDOWS_PINGIT)"
 
+# Build linux/mips binary for LEDE/OpenWrt routers: no cgo (pure Go ping),
+# softfloat for mips cores without an FPU, trimmed paths and stripped
+mips:
+	CGO_ENABLED=0 GOOS=linux GOARCH=mips GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o $(BINARY_NAME)
+	@echo "Build complete: $(BINARY_NAME) (linux/mips softfloat)"
+
+# Build linux/armv7 binary for Raspberry Pi 2 (hardfloat ARMv7, 32-bit OS)
+pi2:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w" -o $(BINARY_NAME)-armv7
+	@echo "Build complete: $(BINARY_NAME)-armv7 (linux/armv7)"
+
+# Build linux/arm64 binary for Raspberry Pi 3/4/5 on a 64-bit OS
+pi3:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o $(BINARY_NAME)-arm64
+	@echo "Build complete: $(BINARY_NAME)-arm64 (linux/arm64)"
+
 # Clean compiled files
 clean:
 	@echo "Cleaning..."
-	rm -f $(BINARY_NAME) pingit $(WINDOWS_BINARY_NAME) $(WINDOWS_PINGIT) $(ICO) $(VERSIONINFO) $(SYSO) $(PINGIT_SYSO)
+	rm -f $(BINARY_NAME) $(BINARY_NAME)-armv7 $(BINARY_NAME)-arm64 pingit $(WINDOWS_BINARY_NAME) $(WINDOWS_PINGIT) $(ICO) $(VERSIONINFO) $(SYSO) $(PINGIT_SYSO)
 	@echo "Clean complete"
